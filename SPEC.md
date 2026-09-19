@@ -1,0 +1,292 @@
+# frame-jury — specification
+
+Status: specification, 2026-09-19. Built milestone by milestone under review,
+benchmarked against the public projects that solve parts of this, and plugged
+into a production pipeline only once it clears the bar in §8.
+
+`AGENTS.md` holds the working rules — licensing boundaries, how the corpus is
+borrowed, what a pull request must carry. Read it before writing code.
+
+The pipeline this was written for is Content Factory, which renders the frames
+and holds the declarations; it consumes frame-jury through its own port, and
+neither project imports the other.
+
+---
+
+## 1. Why this exists, and what makes it better than the donors
+
+A generated frame can be wrong in ways nobody notices until the film is cut: the
+same character appears twice, a declared prop is missing, hands have six
+fingers, the character's face is not the face it had in the previous shot.
+Today the factory renders and hopes.
+
+Every public project read for this judges an image **blind**: DeepFace compares
+two faces, YOLO counts what it recognises, HADM finds broken limbs, a VLM gives
+an opinion. None of them knows what the image was *supposed* to show.
+
+The factory does. Every rendered frame in `build/runs/**/10-resolved-media/visuals/`
+is named after its shot, and the run holds, for that shot:
+
+- `required_visible_entity_ids` — exactly which entities must be in frame;
+- each entity's kind (character, object, environment) from the canonical world;
+- an approved reference image per entity (`05-production-bible/reference-sheet/`);
+- the staging prose, the positive and the negative prompt;
+- the shot's camera framing (a close-up and a wide shot fail differently).
+
+**That declaration is the product's advantage.** A blind detector must guess
+whether two people in a frame are a defect; we know the shot declared one. A
+blind identity check has no anchor; we have an approved reference. So frame-jury
+is not "another detector": it is a *contract checker* that uses detectors as
+evidence.
+
+Second advantage: a labelled corpus that exists already — 782 rendered frames
+and 370 reference images across 74 runs, each joinable to its declaration.
+
+## 2. Scope
+
+**In scope.** Judging one still frame against one shot declaration, returning a
+verdict with evidence, and a benchmark harness that measures ours against the
+donors on our own corpus.
+
+**Out of scope.** Generating or repairing images; video; deciding what to do
+about a verdict (the factory's run control decides that); anything that writes
+into a run directory.
+
+## 3. Hard licensing rules
+
+The judge ships inside a product that is served over a network. Therefore:
+
+1. The installable package (`frame_jury`) depends only on permissive licences —
+   MIT, BSD, Apache-2.0 — for **code and weights**. No AGPL, no
+   research-only weights, no "non-commercial" anything.
+2. The benchmark may install anything, including AGPL-3.0 (Ultralytics) and
+   research-only weights (InsightFace, HADM if it ever gets a licence), but only
+   under `benchmarks/competitors/`, as an **optional extra**
+   (`pip install frame-jury[competitors]`), never imported by `frame_jury`, and
+   never vendored into the repository. A test asserts that no module under
+   `frame_jury/` imports a competitor package.
+3. Every model the package downloads is recorded in `THIRD_PARTY_NOTICES.md`
+   with its licence, its URL and the sha256 of the weights file.
+4. HADM publishes no licence at all: no code, no weights, not even for the
+   benchmark, until its author publishes one. Its *idea* may be reimplemented
+   from the paper.
+
+Known-good starting set: OpenCV Zoo **YuNet** (MIT) and **SFace** (Apache-2.0)
+for faces; **torchvision** detection weights (BSD-3-Clause) or **RT-DETR**
+through `transformers` (Apache-2.0) for presence and counting.
+
+## 4. The contract
+
+One call, one frame. This JSON is the public interface, and the factory's
+adapter will speak exactly it.
+
+```jsonc
+// request
+{
+  "image_path": "…/shot-scene-001-004.png",
+  "shot": {
+    "shot_id": "shot-scene-001-004",
+    "framing": "close-up",            // the shot's camera framing
+    "declared_entities": [
+      { "entity_id": "char-vigia", "kind": "character",
+        "reference_images": ["…/reference-sheet/char-vigia.png"] },
+      { "entity_id": "obj-caderno", "kind": "object", "reference_images": [] }
+    ],
+    "staging": "O vigia inclina-se sobre o caderno…",
+    "positive_prompt": "…",
+    "negative_prompt": "…"
+  },
+  "checks": ["presence", "identity", "anatomy", "legibility"],  // optional subset
+  "budget": "cheap"                   // cheap = local only; full = may call a VLM
+}
+```
+
+```jsonc
+// verdict
+{
+  "shot_id": "shot-scene-001-004",
+  "verdict": "accept" | "reject" | "unsure",
+  "confidence": 0.0,
+  "findings": [
+    { "check": "presence", "defect": "duplicated_character",
+      "entity_id": "char-vigia", "severity": "blocking", "confidence": 0.93,
+      "evidence": { "people_detected": 2, "declared_characters": 1,
+                    "boxes": [[12,40,180,420],[300,44,470,430]] },
+      "explanation": "the shot declares one character and two people are in frame",
+      "prompt_hint": "state that exactly one person is in frame; add a second person to the negative prompt" }
+  ],
+  "measurements": { "faces": 2, "people": 2, "identity_similarity": 0.41 },
+  "timings_ms": { "presence": 120, "identity": 90 },
+  "detectors": [ { "check": "presence", "backend": "rtdetr-r50", "weights_sha256": "…" } ]
+}
+```
+
+Rules the verdict must obey:
+
+- **every finding carries its evidence** — the numbers that produced it, not
+  only a label. A verdict nobody can audit is worthless to the factory, whose
+  rule is that a failed gate must preserve enough evidence to diagnose it;
+- **`unsure` is a first-class answer.** A judge that guesses is worse than one
+  that abstains, because the factory would learn to ignore it;
+- **`prompt_hint` is a suggestion for a human or a station, never an edit.**
+  frame-jury never rewrites a prompt;
+- deterministic: the same image and declaration give the same verdict, with
+  pinned weights and fixed seeds.
+
+## 5. Defect taxonomy (v1)
+
+| defect | check | how it is decided |
+|---|---|---|
+| `duplicated_character` | presence | more people/faces in frame than the declared characters |
+| `extra_person` | presence | a person where none was declared |
+| `missing_entity` | presence | a declared character/object not found |
+| `wrong_identity` | identity | face embedding distance to the entity's reference above threshold |
+| `broken_anatomy` | anatomy | hands/limbs implausible (our own detector; HADM's idea, not its code) |
+| `fused_objects` | anatomy | two declared objects rendered as one body |
+| `garbled_text` | legibility | text-like regions that are not words |
+| `empty_or_flat` | legibility | blank, near-uniform or detail-starved frame |
+
+v1 must ship `presence` and `identity` well. `anatomy` and `legibility` are
+research tracks whose baselines the benchmark measures first.
+
+## 6. Architecture
+
+```text
+frame_jury/
+  contract.py        request/verdict dataclasses, JSON in and out, versioned
+  jury.py            the router: runs checks in order, stops early, merges findings
+  checks/
+    presence.py      counting people/objects against the declaration
+    identity.py      reference-vs-frame face and appearance similarity
+    anatomy.py       hands/limbs plausibility
+    legibility.py    text and flatness
+  backends/          one adapter per model, all permissive
+    detector_rtdetr.py, detector_torchvision.py
+    face_yunet_sface.py
+    vlm_openai_compatible.py      # optional, only when budget = "full"
+  calibration/       thresholds as data, per framing, fitted on the corpus
+  evidence.py        the ledger every verdict writes
+benchmarks/
+  corpus/            builder that joins our runs into cases (no image is copied
+                     into the repo; it points at paths)
+  labels/            human labels, JSONL, versioned
+  competitors/       YOLO / InsightFace / VLM-only wrappers (optional extra)
+  run.py             the harness; writes a leaderboard
+```
+
+Principles, all borrowed from the factory and non-negotiable here:
+
+1. **Cheap gates first.** Counting runs on CPU in ~100 ms; a VLM call costs money
+   and seconds. The router runs deterministic checks first and only escalates
+   what they cannot settle, which is also how the factory orders its own work.
+2. **Backends are replaceable.** A check states what it needs; a backend
+   provides it. Swapping RT-DETR for something better must touch one file.
+3. **Thresholds are data, not code.** They are fitted per framing on the corpus
+   and stored in `calibration/`, with the fit reproducible from the labels.
+4. **No network at inference.** Weights are downloaded once, pinned by sha256,
+   cached locally. The optional VLM backend is the single exception, and it is
+   off by default.
+
+## 7. Corpus and ground truth
+
+The corpus builder reads Content Factory runs and emits one case per rendered
+frame:
+
+```jsonc
+{ "case_id": "run-suspense-stakeout-20260919-181850/shot-scene-001-004",
+  "image_path": "…", "shot": { …the declaration… },
+  "reference_images": { "char-vigia": ["…"] },
+  "provenance": { "run_id": "…", "model": "…", "seed": 1234 } }
+```
+
+Joins, all present in a run: the image file name is the `shot_id`; the
+declaration is in `07-direction/outcome.json`; the world gives each entity's
+kind; `05-production-bible/reference-sheet/` gives reference images; the
+`*.visual.json` sidecar gives prompts, model and seed.
+
+**Labels.** A minimal labelling tool (a local HTML page or a terminal loop)
+shows the frame beside its declaration and records one line per case:
+
+```jsonc
+{ "case_id": "…", "defects": ["duplicated_character"], "notes": "",
+  "labeller": "rudson", "at": "2026-09-20T…" }
+```
+
+Targets: **300 labelled cases** for v1, stratified by run, framing and by
+whether a character is declared; at least 40 positives for each defect v1 ships.
+A case nobody is sure about is labelled `uncertain` and excluded from scoring,
+never guessed.
+
+Splits: `dev` (fit thresholds) and `test` (never used for fitting), split by
+**run**, so frames of the same film cannot leak between them.
+
+## 8. The benchmark, which is the point of the separate repo
+
+`benchmarks/run.py` evaluates every competitor on the same cases and writes a
+leaderboard:
+
+| system | defect | precision | recall | F1 | ms/frame | peak RAM | licence |
+|---|---|---|---|---|---|---|---|
+
+Competitors for v1:
+
+- `frame-jury` (ours, `budget=cheap`) and `frame-jury-full` (with the VLM);
+- `yolo-count` — Ultralytics person counting (AGPL, benchmark only);
+- `insightface-identity` — ArcFace identity (research weights, benchmark only);
+- `vlm-only` — a vision model asked the question in prose, no detectors;
+- `null` — always accept, as the floor everything must beat.
+
+Rules: same cases, same split, pinned versions recorded in the report, three
+runs for timing, median reported. The leaderboard is committed on every change,
+so a regression is visible in a diff.
+
+**The bar to plug it into the factory:** on the held-out split, for
+`duplicated_character` and `wrong_identity`, recall ≥ 0.90 with precision ≥ 0.95
+at `budget=cheap`, under 400 ms per frame on CPU. Precision is the strict one on
+purpose: a judge that rejects good frames burns GPU hours and trust.
+
+## 9. Milestones for the delegated agent
+
+Each milestone is a PR, reviewed before the next starts.
+
+- **M1 — corpus.** Builder, case schema, labelling tool, 300 labels, splits.
+  Done when `python -m benchmarks.corpus --runs <path>` produces cases for every
+  run without touching them, and the label file passes its schema test.
+- **M2 — presence.** Detector backends (torchvision, RT-DETR), the presence
+  check against the declaration, calibration per framing.
+- **M3 — identity.** YuNet + SFace, reference-vs-frame similarity, thresholds
+  fitted per framing; abstain when no face is found in either side.
+- **M4 — harness and baselines.** Competitors, leaderboard, timing protocol.
+  Done when the table is reproducible from a clean clone.
+- **M5 — anatomy and legibility research.** Only after M4 shows where the
+  remaining errors are.
+- **M6 — packaging.** `frame_jury` as a package, contract stable, licence test,
+  `THIRD_PARTY_NOTICES.md`, and an example of the factory adapter.
+
+Quality bar for every milestone: tests that fail without the feature, no network
+in tests, CPU-only path always available, and a README section a person can
+follow from a clean machine.
+
+## 10. How the factory will use it
+
+The factory keeps its own port (`VisualAssuranceGate`) and its own contract.
+frame-jury is a provider behind it, exactly like ComfyUI is behind the image
+port. The run-control design already says where the verdict goes: it is the
+visual judge stage of `docs/ARTIFACT-REUSE.md` — after each image, one
+regeneration with an adjusted prompt for a frame it rejects, then
+`awaiting-review` for the human eye.
+
+Nothing in frame-jury may import Content Factory, and nothing in Content Factory
+may import a frame-jury internal: the JSON contract in §4 is the whole surface.
+
+## 11. Working agreement for the delegation
+
+- The agent works in the `frame-jury` repository only, never in the factory.
+- The factory's runs are **read-only input**: the corpus builder must open them
+  read-only and copy nothing into the repository. No image is committed.
+- Every claim of quality comes with the leaderboard row that supports it.
+- When a donor's approach is reproduced, the paper or repository is cited in the
+  code comment, with its licence, and the implementation is written from the
+  description — not copied.
+- Report at each milestone: what was built, the leaderboard diff, what surprised
+  you, and what you would change in this spec.

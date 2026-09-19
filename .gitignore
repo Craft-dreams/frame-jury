@@ -1,0 +1,17 @@
+# Weights are downloaded from their publisher, never committed.
+weights/
+*.onnx
+*.pt
+*.pth
+*.safetensors
+
+# Corpus cases point at images on the operator's machine; nothing is copied in.
+benchmarks/cases/
+benchmarks/reports/*.json
+build/
+dist/
+*.egg-info/
+__pycache__/
+.venv/
+.pytest_cache/
+.env
