@@ -19,9 +19,58 @@ that abstains.
 
 ## Status
 
-Specification first. `SPEC.md` is the contract, the architecture, the defect
-taxonomy, the benchmark protocol and the bar that must be cleared before this is
-plugged into a production pipeline. Code follows it, milestone by milestone.
+Milestone M1 provides the corpus builder, strict case and label schemas, a local
+keyboard-first labelling page, and deterministic run-level dev/test splits.
+Detector work starts in M2.
+
+## Build and label the corpus
+
+Requirements: Python 3.12 or newer. M1 uses only the standard library; it needs
+no package installation, network access, model weights, or GPU. Run commands
+from the repository root.
+
+Build cases from the Content Factory runs. The builder only reads the run tree;
+each case stores absolute paths to the existing images and no image is copied:
+
+```powershell
+python -m benchmarks.corpus.build `
+  --runs C:\path\to\content-factory\build\runs `
+  --out benchmarks\cases\cases.jsonl
+```
+
+`python -m benchmarks.corpus` is an equivalent shorter entry point. The command
+prints the number of runs seen and usable, cases emitted, and every counted skip
+reason. Output is deterministic for an unchanged run tree.
+
+Start the labelling page (the label file is created on the first decision):
+
+```powershell
+python -m benchmarks.label `
+  --cases benchmarks\cases\cases.jsonl `
+  --labels benchmarks\labels\labels.jsonl `
+  --labeller your-name
+```
+
+The page opens at `http://127.0.0.1:8765/`. Keys `1`–`8` toggle the eight defect
+labels, `Enter` saves them, `C` records `clean`, `U` records `uncertain`, and `N`
+focuses notes. Each decision is appended as one JSON line. Restarting the server
+validates the existing file and resumes at the first unlabelled case.
+
+Create the deterministic split only after the corpus is built. Cases from one
+run always stay on one side:
+
+```powershell
+python -m benchmarks.corpus.split `
+  --cases benchmarks\cases\cases.jsonl `
+  --out benchmarks\cases\splits.json `
+  --seed 20260919
+```
+
+Run the offline test suite on a clean checkout with:
+
+```powershell
+python -m unittest discover -s tests -v
+```
 
 ## What it does
 
