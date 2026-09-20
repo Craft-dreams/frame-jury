@@ -5,12 +5,37 @@ from __future__ import annotations
 import json
 import os
 import threading
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from benchmarks.corpus.schema import iter_cases
 
-from .schema import LabelValidationError, validate_label
+from .schema import DEFECTS, LabelValidationError, validate_label
+
+
+def _framing_band(framing: str) -> int:
+    normalized = framing.casefold()
+    if "close" in normalized or "medium" in normalized:
+        return 0
+    if "wide" in normalized:
+        return 1
+    return 2
+
+
+def queue_order(case: dict[str, Any]) -> tuple[int, int, str, str]:
+    """Prioritize likely defects while keeping runs together inside each band."""
+
+    character_count = sum(
+        entity["kind"] == "character" for entity in case["shot"]["declared_entities"]
+    )
+    character_band = 0 if character_count >= 2 else 1 if character_count == 1 else 2
+    return (
+        character_band,
+        _framing_band(case["shot"]["framing"]),
+        case["provenance"]["run_id"].casefold(),
+        case["case_id"].casefold(),
+    )
 
 
 class LabelStore:
@@ -19,10 +44,12 @@ class LabelStore:
     def __init__(self, cases_path: str | Path, labels_path: str | Path):
         self.cases_path = Path(cases_path)
         self.labels_path = Path(labels_path)
-        self.cases = list(iter_cases(self.cases_path))
+        self.cases = sorted(iter_cases(self.cases_path), key=queue_order)
         self._by_id = {case["case_id"]: case for case in self.cases}
         self._lock = threading.Lock()
-        self._labelled = self._read_labelled_ids()
+        self._positive_counts: Counter[str] = Counter({defect: 0 for defect in DEFECTS})
+        self._legacy_broken_anatomy_count = 0
+        self._labelled = self._read_labels()
 
     @property
     def labelled_count(self) -> int:
@@ -32,7 +59,15 @@ class LabelStore:
     def total_count(self) -> int:
         return len(self.cases)
 
-    def _read_labelled_ids(self) -> set[str]:
+    @property
+    def positive_counts(self) -> dict[str, int]:
+        return {defect: self._positive_counts[defect] for defect in DEFECTS}
+
+    @property
+    def legacy_broken_anatomy_count(self) -> int:
+        return self._legacy_broken_anatomy_count
+
+    def _read_labels(self) -> set[str]:
         labelled: set[str] = set()
         if not self.labels_path.exists():
             return labelled
@@ -56,7 +91,15 @@ class LabelStore:
                         f"{self.labels_path}:{line_number}: duplicate label for {case_id!r}"
                     )
                 labelled.add(case_id)
+                self._record_counts(label["defects"])
         return labelled
+
+    def _record_counts(self, defects: list[str]) -> None:
+        for defect in defects:
+            if defect in self._positive_counts:
+                self._positive_counts[defect] += 1
+            elif defect == "broken_anatomy":
+                self._legacy_broken_anatomy_count += 1
 
     def next_case(self) -> dict[str, Any] | None:
         return next((case for case in self.cases if case["case_id"] not in self._labelled), None)
@@ -76,3 +119,4 @@ class LabelStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             self._labelled.add(case_id)
+            self._record_counts(validated["defects"])

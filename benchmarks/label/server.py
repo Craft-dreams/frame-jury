@@ -14,7 +14,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
-from .schema import DEFECTS, LABEL_SCHEMA_VERSION, LabelValidationError
+from .schema import (
+    DEFECTS,
+    LABEL_SCHEMA_VERSION,
+    TAXONOMY_VERSION,
+    LabelValidationError,
+)
 from .store import LabelStore
 
 _STATIC_DIR = Path(__file__).with_name("static")
@@ -35,7 +40,7 @@ def _public_case(case: dict[str, Any]) -> dict[str, Any]:
 
 def make_handler(store: LabelStore, labeller: str) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
-        server_version = "frame-jury-label/1.0"
+        server_version = "frame-jury-label/2.0"
 
         def log_message(self, format: str, *args: Any) -> None:
             print(f"{self.address_string()} - {format % args}")
@@ -114,6 +119,8 @@ def make_handler(store: LabelStore, labeller: str) -> type[BaseHTTPRequestHandle
                         "labeller": labeller,
                         "labelled": store.labelled_count,
                         "total": store.total_count,
+                        "positive_counts": store.positive_counts,
+                        "legacy_broken_anatomy": store.legacy_broken_anatomy_count,
                     },
                 )
             elif parsed.path == "/asset":
@@ -134,6 +141,7 @@ def make_handler(store: LabelStore, labeller: str) -> type[BaseHTTPRequestHandle
                     raise ValueError("request must be an object")
                 label = {
                     "schema_version": LABEL_SCHEMA_VERSION,
+                    "taxonomy_version": TAXONOMY_VERSION,
                     "case_id": payload.get("case_id"),
                     "defects": payload.get("defects"),
                     "notes": payload.get("notes", ""),

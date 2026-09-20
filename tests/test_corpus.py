@@ -26,12 +26,46 @@ class CorpusBuilderTests(unittest.TestCase):
             self.assertEqual(case["case_id"], "run-example/shot-scene-001-001")
             self.assertTrue(Path(case["image_path"]).is_absolute())
             self.assertEqual(case["shot"]["framing"], "close-up")
-            self.assertEqual(case["shot"]["staging"], "The keeper leans over the notebook.")
+            self.assertEqual(
+                case["shot"]["staging"],
+                {
+                    "purpose": "The keeper leans over the notebook.",
+                    "must_render": ["The notebook must be open."],
+                    "composition": ["Keep both entities in focus."],
+                },
+            )
             self.assertEqual(case["shot"]["positive_prompt"], "A tired keeper bends over an open notebook.")
             self.assertEqual(case["shot"]["negative_prompt"], "extra people, duplicate keeper")
             self.assertEqual(
-                [(entity["entity_id"], entity["kind"]) for entity in case["shot"]["declared_entities"]],
-                [("char-keeper", "character"), ("obj-notebook", "object")],
+                [
+                    (
+                        entity["entity_id"],
+                        entity["display_name"],
+                        entity["aliases"],
+                        entity["visual_identity"],
+                        entity["relative_scale"],
+                        entity["approximate_dimensions"],
+                    )
+                    for entity in case["shot"]["declared_entities"]
+                ],
+                [
+                    (
+                        "char-keeper",
+                        "The keeper",
+                        ["night watchman"],
+                        "A tired keeper in a dark wool coat.",
+                        "adult human",
+                        "1.75 m tall",
+                    ),
+                    (
+                        "obj-notebook",
+                        "Open notebook",
+                        [],
+                        "A worn, cloth-bound notebook.",
+                        "hand-held",
+                        "20 cm by 14 cm",
+                    ),
+                ],
             )
             self.assertEqual(case["provenance"], {"run_id": "run-example", "model": "fixture-model", "seed": 1234})
             self.assertEqual(cases, build_corpus(root)[0], "the same input must preserve order and bytes")
@@ -69,8 +103,23 @@ class CorpusBuilderTests(unittest.TestCase):
             cases, report = build_corpus(root)
 
             self.assertEqual(cases, [])
-            self.assertEqual(report.runs_usable, 1)
+            self.assertEqual(report.runs_usable, 0)
             self.assertEqual(report.cases_skipped_by_reason["malformed_declaration"], 1)
+            self.assertEqual(report.runs_skipped_by_reason["no_emitted_cases"], 1)
+
+    def test_bible_profiles_are_optional_as_a_group(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "runs"
+            run = make_run(root)
+            (run / "05-production-bible" / "bible.json").unlink()
+
+            cases, report = build_corpus(root)
+
+            self.assertEqual(report.runs_usable, 1)
+            for entity in cases[0]["shot"]["declared_entities"]:
+                self.assertNotIn("visual_identity", entity)
+                self.assertNotIn("relative_scale", entity)
+                self.assertNotIn("approximate_dimensions", entity)
 
 
 class CaseSchemaTests(unittest.TestCase):
@@ -95,6 +144,22 @@ class CaseSchemaTests(unittest.TestCase):
                 output.read_text(encoding="utf-8"),
                 "a failed atomic rewrite must preserve the existing valid corpus",
             )
+
+    def test_visual_profile_fields_must_appear_together(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            case = make_case(Path(directory), "run-a", "shot-a")
+            entity = {
+                "entity_id": "char-a",
+                "kind": "character",
+                "display_name": "A",
+                "aliases": [],
+                "reference_images": [],
+                "visual_identity": "A person.",
+            }
+            case["shot"]["declared_entities"] = [entity]
+            case["reference_images"] = {"char-a": []}
+            with self.assertRaisesRegex(CaseValidationError, "must appear together"):
+                validate_case(case)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-const shortcuts = ["1", "2", "3", "4", "5", "6", "7", "8"];
+const shortcuts = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
 let currentCase = null;
 let selected = new Set();
 
@@ -13,15 +13,12 @@ function setMessage(message, error = false) {
 function renderEntity(entity) {
   const wrapper = document.createElement("article");
   wrapper.className = "entity";
-  const heading = document.createElement("h3");
-  heading.textContent = `${entity.entity_id} · ${entity.kind}`;
-  wrapper.appendChild(heading);
   const references = document.createElement("div");
   references.className = "references";
   for (const [index, url] of entity.reference_urls.entries()) {
     const image = document.createElement("img");
     image.src = url;
-    image.alt = `Reference ${index + 1} for ${entity.entity_id}`;
+    image.alt = `Reference ${index + 1} for ${entity.display_name}`;
     references.appendChild(image);
   }
   if (!entity.reference_urls.length) {
@@ -29,7 +26,39 @@ function renderEntity(entity) {
     references.classList.add("empty");
   }
   wrapper.appendChild(references);
+  const description = document.createElement("div");
+  description.className = "entity-description";
+  const heading = document.createElement("h3");
+  heading.textContent = `${entity.display_name} (${entity.kind})`;
+  description.appendChild(heading);
+  const identity = document.createElement("p");
+  identity.className = "visual-identity";
+  identity.textContent = entity.visual_identity || "Visual profile unavailable";
+  identity.title = identity.textContent;
+  description.appendChild(identity);
+  if (entity.relative_scale || entity.approximate_dimensions) {
+    const scale = document.createElement("p");
+    scale.className = "scale";
+    scale.textContent = `Scale: ${[entity.relative_scale, entity.approximate_dimensions].filter(Boolean).join(" · ")}`;
+    description.appendChild(scale);
+  }
+  const trace = document.createElement("small");
+  const aliases = entity.aliases.length ? ` · aliases: ${entity.aliases.join(", ")}` : "";
+  trace.textContent = `${entity.entity_id}${aliases}`;
+  description.appendChild(trace);
+  wrapper.appendChild(description);
   return wrapper;
+}
+
+function renderProgress(state) {
+  byId("progress-summary").textContent = `${state.labelled} / ${state.total} labelled · ${state.labeller}`;
+  const counts = Object.entries(state.positive_counts)
+    .map(([defect, count]) => `${defect} ${count}`)
+    .join(" · ");
+  const legacy = state.legacy_broken_anatomy
+    ? ` · broken_anatomy (legacy, unspecified) ${state.legacy_broken_anatomy}`
+    : "";
+  byId("positive-counts").textContent = `${counts}${legacy}`;
 }
 
 function toggleDefect(defect, button) {
@@ -42,7 +71,7 @@ function toggleDefect(defect, button) {
 async function loadNext() {
   const response = await fetch("/api/next", {cache: "no-store"});
   const state = await response.json();
-  byId("progress").textContent = `${state.labelled} / ${state.total} labelled · ${state.labeller}`;
+  renderProgress(state);
   currentCase = state.case;
   selected.clear();
   document.querySelectorAll("[data-defect]").forEach((button) => button.classList.remove("selected"));
@@ -58,11 +87,16 @@ async function loadNext() {
   byId("frame").src = currentCase.image_url;
   byId("case-id").textContent = currentCase.case_id;
   byId("framing").textContent = currentCase.shot.framing;
-  byId("staging").textContent = currentCase.shot.staging;
+  byId("purpose").textContent = currentCase.shot.staging.purpose;
+  byId("must-render").textContent = currentCase.shot.staging.must_render.join(" · ") || "None declared";
+  byId("composition").textContent = currentCase.shot.staging.composition.join(" · ") || "None declared";
   byId("positive-prompt").textContent = currentCase.shot.positive_prompt;
   byId("negative-prompt").textContent = currentCase.shot.negative_prompt || "None";
   const entities = byId("entities");
   entities.replaceChildren(...currentCase.shot.declared_entities.map(renderEntity));
+  byId("no-character").hidden = currentCase.shot.declared_entities.some(
+    (entity) => entity.kind === "character",
+  );
 }
 
 async function submit(defects) {

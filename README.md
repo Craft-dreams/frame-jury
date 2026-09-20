@@ -40,7 +40,8 @@ python -m benchmarks.corpus.build `
 
 `python -m benchmarks.corpus` is an equivalent shorter entry point. The command
 prints the number of runs seen and usable, cases emitted, and every counted skip
-reason. Output is deterministic for an unchanged run tree.
+reason. A usable run is one with at least one emitted case, regardless of what
+other stages it contains. Output is deterministic for an unchanged run tree.
 
 Start the labelling page (the label file is created on the first decision):
 
@@ -51,10 +52,26 @@ python -m benchmarks.label `
   --labeller your-name
 ```
 
-The page opens at `http://127.0.0.1:8765/`. Keys `1`–`8` toggle the eight defect
-labels, `Enter` saves them, `C` records `clean`, `U` records `uncertain`, and `N`
-focuses notes. Each decision is appended as one JSON line. Restarting the server
-validates the existing file and resumes at the first unlabelled case.
+The page opens at `http://127.0.0.1:8765/`. Keys `1`–`9` and `0` toggle the ten
+defect labels; each button shows its shortcut, with `duplicated_character` on
+`1` and `broken_hands` on `2`. `Enter` saves, `C` records `clean`, `U` records
+`uncertain`, and `N` focuses notes. The progress header includes the positive
+count for every defect.
+
+The labelling queue is deterministic and designed to surface useful positives:
+shots declaring two or more characters come first, then one-character shots;
+inside each character-count band, close-ups and medium shots precede wide shots,
+then other framings. Cases are grouped by run inside each band, with case id as
+the final stable tie-breaker. This is only a presentation order: it does not
+change case ids or the dev/test split.
+
+Each decision is appended as one JSON line. New lines use label schema 2.0 and
+explicitly record `taxonomy_version: "2.0"`. Existing schema-1.0 lines are not
+rewritten: an old `broken_anatomy` remains “body or hands, unspecified” for
+later scoring, never silently mapped to `broken_hands` or `broken_body`.
+Restarting the server validates both current and legacy lines and resumes at the
+first unlabelled case. Stop and restart any labelling server that was already
+running when you update to this version, so its API and page use the same schema.
 
 Create the deterministic split only after the corpus is built. Cases from one
 run always stay on one side:

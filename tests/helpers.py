@@ -40,6 +40,8 @@ def make_run(root: Path, name: str = "run-example") -> Path:
                             "shot_id": shot_id,
                             "scene_id": "scene-001",
                             "purpose": "The keeper leans over the notebook.",
+                            "must_render_constraints": ["The notebook must be open."],
+                            "composition_constraints": ["Keep both entities in focus."],
                             "camera": {"framing": "close-up"},
                             "required_visible_entity_ids": ["char-keeper", "obj-notebook"],
                         }
@@ -50,12 +52,41 @@ def make_run(root: Path, name: str = "run-example") -> Path:
     }
     world = {
         "identities": [
-            {"entity_id": "char-keeper", "kind": "character"},
-            {"entity_id": "obj-notebook", "kind": "object"},
+            {
+                "entity_id": "char-keeper",
+                "kind": "character",
+                "display_name": "The keeper",
+                "aliases": ["night watchman"],
+            },
+            {
+                "entity_id": "obj-notebook",
+                "kind": "object",
+                "display_name": "Open notebook",
+                "aliases": [],
+            },
         ]
     }
     write_json(run / "07-direction" / "outcome.json", direction)
     write_json(run / "03-world" / "canonical-world.json", world)
+    write_json(
+        run / "05-production-bible" / "bible.json",
+        {
+            "visual_profiles": [
+                {
+                    "entity_id": "char-keeper",
+                    "visual_identity": "A tired keeper in a dark wool coat.",
+                    "relative_scale": "adult human",
+                    "approximate_dimensions": "1.75 m tall",
+                },
+                {
+                    "entity_id": "obj-notebook",
+                    "visual_identity": "A worn, cloth-bound notebook.",
+                    "relative_scale": "hand-held",
+                    "approximate_dimensions": "20 cm by 14 cm",
+                },
+            ]
+        },
+    )
     write_png(run / "05-production-bible" / "reference-sheet" / "char-keeper.png", red=255)
     write_png(run / "05-production-bible" / "reference-sheet" / "obj-notebook.png", green=255)
     image = run / "10-resolved-media" / "visuals" / f"{shot_id}.png"
@@ -84,7 +115,11 @@ def make_case(root: Path, run_id: str, shot_id: str) -> dict[str, Any]:
             "shot_id": shot_id,
             "framing": "wide shot",
             "declared_entities": [],
-            "staging": "An empty room.",
+            "staging": {
+                "purpose": "An empty room.",
+                "must_render": [],
+                "composition": [],
+            },
             "positive_prompt": "An empty room in a wide shot.",
             "negative_prompt": "people",
         },

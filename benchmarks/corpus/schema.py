@@ -7,8 +7,20 @@ from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
-CASE_SCHEMA_VERSION = "1.0"
+CASE_SCHEMA_VERSION = "2.0"
 ENTITY_KINDS = frozenset({"character", "object", "environment"})
+_ENTITY_REQUIRED_FIELDS = {
+    "entity_id",
+    "kind",
+    "display_name",
+    "aliases",
+    "reference_images",
+}
+_ENTITY_PROFILE_FIELDS = {
+    "visual_identity",
+    "relative_scale",
+    "approximate_dimensions",
+}
 
 
 class CaseValidationError(ValueError):
@@ -47,6 +59,18 @@ def _absolute_path(value: Any, location: str) -> str:
     return path
 
 
+def _string_array(value: Any, location: str) -> list[str]:
+    if not isinstance(value, list):
+        _fail(location, "must be an array")
+    values = [
+        _string(item, f"{location}[{index}]")
+        for index, item in enumerate(value)
+    ]
+    if len(values) != len(set(values)):
+        _fail(location, "must not contain duplicates")
+    return values
+
+
 def validate_case(value: Any) -> dict[str, Any]:
     """Validate one case and return it unchanged with a precise error on failure."""
 
@@ -73,7 +97,11 @@ def validate_case(value: Any) -> dict[str, Any]:
     if Path(image_path).stem != shot_id:
         _fail("case.image_path", "file stem must equal shot.shot_id")
     _string(shot["framing"], "case.shot.framing")
-    _string(shot["staging"], "case.shot.staging")
+    staging = _mapping(shot["staging"], "case.shot.staging")
+    _exact_keys(staging, {"purpose", "must_render", "composition"}, "case.shot.staging")
+    _string(staging["purpose"], "case.shot.staging.purpose")
+    _string_array(staging["must_render"], "case.shot.staging.must_render")
+    _string_array(staging["composition"], "case.shot.staging.composition")
     _string(shot["positive_prompt"], "case.shot.positive_prompt")
     _string(shot["negative_prompt"], "case.shot.negative_prompt", allow_empty=True)
 
@@ -85,13 +113,29 @@ def validate_case(value: Any) -> dict[str, Any]:
     for index, raw_entity in enumerate(entities):
         location = f"case.shot.declared_entities[{index}]"
         entity = _mapping(raw_entity, location)
-        _exact_keys(entity, {"entity_id", "kind", "reference_images"}, location)
+        keys = set(entity)
+        missing = _ENTITY_REQUIRED_FIELDS - keys
+        extra = keys - _ENTITY_REQUIRED_FIELDS - _ENTITY_PROFILE_FIELDS
+        profile_fields = keys & _ENTITY_PROFILE_FIELDS
+        if missing:
+            _fail(location, f"missing field(s): {', '.join(sorted(missing))}")
+        if extra:
+            _fail(location, f"unknown field(s): {', '.join(sorted(extra))}")
+        if profile_fields and profile_fields != _ENTITY_PROFILE_FIELDS:
+            _fail(
+                location,
+                "visual_identity, relative_scale and approximate_dimensions must appear together",
+            )
         entity_id = _string(entity["entity_id"], f"{location}.entity_id")
         if entity_id in seen_entities:
             _fail(f"{location}.entity_id", "must be unique within the declaration")
         seen_entities.add(entity_id)
         if entity["kind"] not in ENTITY_KINDS:
             _fail(f"{location}.kind", f"must be one of {', '.join(sorted(ENTITY_KINDS))}")
+        _string(entity["display_name"], f"{location}.display_name")
+        _string_array(entity["aliases"], f"{location}.aliases")
+        for field in sorted(profile_fields):
+            _string(entity[field], f"{location}.{field}")
         references = entity["reference_images"]
         if not isinstance(references, list):
             _fail(f"{location}.reference_images", "must be an array")

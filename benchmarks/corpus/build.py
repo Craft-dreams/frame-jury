@@ -120,11 +120,11 @@ def _declarations(direction: dict[str, Any]) -> dict[str, tuple[dict[str, Any], 
     return declarations
 
 
-def _entity_kinds(world: dict[str, Any]) -> dict[str, str]:
+def _entities(world: dict[str, Any]) -> dict[str, dict[str, Any]]:
     identities = world.get("identities")
     if not isinstance(identities, list):
         raise SourceDataError("malformed_world: identities must be an array")
-    kinds: dict[str, str] = {}
+    entities: dict[str, dict[str, Any]] = {}
     for index, identity in enumerate(identities):
         if not isinstance(identity, dict):
             raise SourceDataError(f"malformed_world: identities[{index}] must be an object")
@@ -136,10 +136,68 @@ def _entity_kinds(world: dict[str, Any]) -> dict[str, str]:
         kind = _string(
             identity.get("kind"), f"identities[{index}].kind", reason="malformed_world"
         )
-        if entity_id in kinds:
+        display_name = _string(
+            identity.get("display_name"),
+            f"identities[{index}].display_name",
+            reason="malformed_world",
+        )
+        aliases = identity.get("aliases")
+        if not isinstance(aliases, list) or any(
+            not isinstance(alias, str) or not alias.strip() for alias in aliases
+        ):
+            raise SourceDataError(
+                f"malformed_world: identities[{index}].aliases must be an array of non-empty strings"
+            )
+        if len(aliases) != len(set(aliases)):
+            raise SourceDataError(
+                f"malformed_world: identities[{index}].aliases contains duplicates"
+            )
+        if entity_id in entities:
             raise SourceDataError(f"malformed_world: duplicate entity_id {entity_id!r}")
-        kinds[entity_id] = kind
-    return kinds
+        entities[entity_id] = {
+            "kind": kind,
+            "display_name": display_name,
+            "aliases": list(aliases),
+        }
+    return entities
+
+
+def _visual_profiles(bible: dict[str, Any]) -> dict[str, dict[str, str]]:
+    raw_profiles = bible.get("visual_profiles")
+    if not isinstance(raw_profiles, list):
+        raise SourceDataError("malformed_bible: visual_profiles must be an array")
+    profiles: dict[str, dict[str, str]] = {}
+    for index, raw_profile in enumerate(raw_profiles):
+        if not isinstance(raw_profile, dict):
+            raise SourceDataError(f"malformed_bible: visual_profiles[{index}] must be an object")
+        entity_id = _string(
+            raw_profile.get("entity_id"),
+            f"visual_profiles[{index}].entity_id",
+            reason="malformed_bible",
+        )
+        if entity_id in profiles:
+            raise SourceDataError(f"malformed_bible: duplicate entity_id {entity_id!r}")
+        profiles[entity_id] = {
+            field: _string(
+                raw_profile.get(field),
+                f"visual_profiles[{index}].{field}",
+                reason="malformed_bible",
+            )
+            for field in ("visual_identity", "relative_scale", "approximate_dimensions")
+        }
+    return profiles
+
+
+def _constraint_list(value: Any, field_name: str) -> list[str]:
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
+        raise SourceDataError(
+            f"malformed_declaration: {field_name} must be an array of non-empty strings"
+        )
+    if len(value) != len(set(value)):
+        raise SourceDataError(f"malformed_declaration: {field_name} contains duplicates")
+    return list(value)
 
 
 def _reference_index(reference_dir: Path) -> dict[str, list[str]]:
@@ -153,7 +211,8 @@ def _case_for_image(
     run: Path,
     image: Path,
     declarations: dict[str, tuple[dict[str, Any], dict[str, Any]]],
-    kinds: dict[str, str],
+    entities: dict[str, dict[str, Any]],
+    profiles: dict[str, dict[str, str]],
     references: dict[str, list[str]],
 ) -> dict[str, Any]:
     shot_id = image.stem
@@ -164,7 +223,15 @@ def _case_for_image(
     if not isinstance(camera, dict):
         raise SourceDataError(f"malformed_declaration: shot {shot_id!r} camera must be an object")
     framing = _string(camera.get("framing"), f"shot {shot_id!r} camera.framing")
-    staging = _string(shot_spec.get("purpose"), f"shot {shot_id!r} purpose")
+    purpose = _string(shot_spec.get("purpose"), f"shot {shot_id!r} purpose")
+    must_render = _constraint_list(
+        shot_spec.get("must_render_constraints"),
+        f"shot {shot_id!r} must_render_constraints",
+    )
+    composition = _constraint_list(
+        shot_spec.get("composition_constraints"),
+        f"shot {shot_id!r} composition_constraints",
+    )
     entity_ids = shot_spec.get("required_visible_entity_ids")
     if not isinstance(entity_ids, list) or any(not isinstance(item, str) or not item for item in entity_ids):
         raise SourceDataError(
@@ -178,19 +245,20 @@ def _case_for_image(
     declared_entities = []
     reference_map: dict[str, list[str]] = {}
     for entity_id in entity_ids:
-        if entity_id not in kinds:
+        if entity_id not in entities:
             raise SourceDataError(
                 f"unknown_entity: shot {shot_id!r} references {entity_id!r}, absent from canonical world"
             )
         entity_references = references.get(entity_id, [])
         reference_map[entity_id] = entity_references
-        declared_entities.append(
-            {
-                "entity_id": entity_id,
-                "kind": kinds[entity_id],
-                "reference_images": entity_references,
-            }
-        )
+        declared_entity = {
+            "entity_id": entity_id,
+            **entities[entity_id],
+            "reference_images": entity_references,
+        }
+        if entity_id in profiles:
+            declared_entity.update(profiles[entity_id])
+        declared_entities.append(declared_entity)
 
     sidecar_path = image.with_name(f"{shot_id}.visual.json")
     if not sidecar_path.is_file():
@@ -234,7 +302,11 @@ def _case_for_image(
             "shot_id": shot_id,
             "framing": framing,
             "declared_entities": declared_entities,
-            "staging": staging,
+            "staging": {
+                "purpose": purpose,
+                "must_render": must_render,
+                "composition": composition,
+            },
             "positive_prompt": positive_prompt,
             "negative_prompt": negative_prompt,
         },
@@ -279,7 +351,13 @@ def build_corpus(runs_path: str | Path) -> tuple[list[dict[str, Any]], BuildRepo
             direction = _read_json(run / _STAGES["missing_direction"], "direction")
             world = _read_json(run / _STAGES["missing_world"], "world")
             declarations = _declarations(direction)
-            kinds = _entity_kinds(world)
+            entities = _entities(world)
+            bible_path = run / "05-production-bible" / "bible.json"
+            profiles = (
+                _visual_profiles(_read_json(bible_path, "bible"))
+                if bible_path.is_file()
+                else {}
+            )
         except SourceDataError as exc:
             reason = str(exc).split(":", 1)[0]
             report.runs_skipped_by_reason[reason] += 1
@@ -289,13 +367,15 @@ def build_corpus(runs_path: str | Path) -> tuple[list[dict[str, Any]], BuildRepo
             )
             continue
 
-        report.runs_usable += 1
         reference_dir = run / _STAGES["missing_reference_sheet"]
         visual_dir = run / _STAGES["missing_visuals"]
         references = _reference_index(reference_dir)
+        emitted_for_run = 0
         for image in sorted(visual_dir.glob("*.png"), key=lambda item: item.name.casefold()):
             try:
-                case = _case_for_image(run, image, declarations, kinds, references)
+                case = _case_for_image(
+                    run, image, declarations, entities, profiles, references
+                )
             except SourceDataError as exc:
                 reason = str(exc).split(":", 1)[0]
                 report.cases_skipped_by_reason[reason] += 1
@@ -305,6 +385,12 @@ def build_corpus(runs_path: str | Path) -> tuple[list[dict[str, Any]], BuildRepo
                 continue
             case_ids.add(case["case_id"])
             cases.append(case)
+            emitted_for_run += 1
+
+        if emitted_for_run:
+            report.runs_usable += 1
+        else:
+            report.runs_skipped_by_reason["no_emitted_cases"] += 1
 
     cases.sort(key=lambda case: case["case_id"])
     report.cases_emitted = len(cases)
