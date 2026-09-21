@@ -298,11 +298,21 @@ purpose: a judge that rejects good frames burns GPU hours and trust.
 
 ## 9. Milestones for the delegated agent
 
-Each milestone is a PR, reviewed before the next starts.
+Each milestone is a PR. See `DELEGATION.md` for who builds each one, on which
+model, and what they may do without asking.
+
+**Labels are not on the critical path of the code.** The operator has no desk
+time to label, so the 300 labels M1 asks for do not exist yet and will not for a
+while. Every milestone below is therefore built so that *only the fitting of
+thresholds* needs them: backends, checks, the harness and the packaging are
+written and tested against synthetic and hand-made fixtures, behind a default
+threshold file that the labels later replace. A milestone that cannot be
+finished without labels stops at that seam, says so in its PR, and moves on.
 
 - **M1 — corpus.** Builder, case schema, labelling tool, 300 labels, splits.
   Done when `python -m benchmarks.corpus --runs <path>` produces cases for every
   run without touching them, and the label file passes its schema test.
+  *Code merged in PR #1; the 300 labels remain outstanding.*
 - **M2 — presence.** Detector backends (torchvision, RT-DETR), the presence
   check against the declaration, calibration per framing.
 - **M3 — identity.** YuNet + SFace, reference-vs-frame similarity, thresholds
@@ -313,6 +323,18 @@ Each milestone is a PR, reviewed before the next starts.
   remaining errors are.
 - **M6 — packaging.** `frame_jury` as a package, contract stable, licence test,
   `THIRD_PARTY_NOTICES.md`, and an example of the factory adapter.
+- **M7 — mobile labelling, an offline-first PWA.** The labels are blocked on the
+  operator having no desk time, so labelling has to fit a commute. Before
+  leaving, the phone pulls a bundle — downscaled WebP frames, reference
+  thumbnails and declarations, roughly 100–150 MB for the 782 cases against
+  726 MB of originals — then labels with **no connectivity at all**, queueing
+  decisions locally and syncing into `labels.jsonl` when it next reaches the
+  machine. This keeps the corpus on the operator's machine, needs no hosting and
+  no PC left running, and survives a subway. It reuses the M1 queue order,
+  taxonomy v2.0 and append-only store rather than inventing a second labelling
+  path: the same case ids, the same schema, the same file. Last in sequence
+  because the detector work does not wait on it, but it is what finally unblocks
+  every threshold in M2 and M3.
 
 Quality bar for every milestone: tests that fail without the feature, no network
 in tests, CPU-only path always available, and a README section a person can
