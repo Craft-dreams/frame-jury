@@ -106,3 +106,87 @@ class DetectorBackend(ABC):
             for d in self.detect(image_path, score_threshold=score_threshold)
             if d.label == "person"
         ]
+
+
+class FaceBackend(ABC):
+    """Abstract base for all face detection and embedding backends.
+
+    Concrete implementations live in this package: one file each, one class
+    each. The class must be constructible without arguments (all configuration
+    via defaulted calibration thresholds), and methods must be pure — same
+    image, same result, every time.
+
+    SPEC.md requirements:
+    - No network at inference: weights are cached locally, pinned by sha256.
+    - CPU path always exists: runs on CPU.
+    - Deterministic: same image gives same detections and embeddings.
+    """
+
+    @abstractmethod
+    def name(self) -> str:
+        """Human-readable name + variant, e.g. ``'yunet-sface'``."""
+
+    @abstractmethod
+    def weights_sha256(self) -> str:
+        """SHA-256 hex digest of the downloaded weights file(s).
+
+        Used in the verdict's ``detectors`` list for traceability (SPEC.md §4).
+        """
+
+    @abstractmethod
+    def detect_faces(self, image_path: str | Path) -> list[Detection]:
+        """Detect all faces in *image_path*.
+
+        Parameters
+        ----------
+        image_path:
+            Absolute path to a JPEG or PNG image. The backend opens it
+            read-only; it never modifies the file.
+
+        Returns
+        -------
+        list[Detection]
+            All detected face instances, sorted by confidence descending.
+            Each Detection has label ``"face"``.
+            Returns an empty list rather than raising when no faces are found.
+        """
+
+    @abstractmethod
+    def embed(
+        self,
+        image_path: str | Path,
+        box: tuple[int, int, int, int],
+    ) -> list[float]:
+        """Compute the facial feature embedding for the face inside *box*.
+
+        Parameters
+        ----------
+        image_path:
+            Absolute path to the image containing the face.
+        box:
+            Bounding box as ``(x_min, y_min, x_max, y_max)`` in pixel coordinates.
+
+        Returns
+        -------
+        list[float]
+            The feature embedding vector.
+        """
+
+    @abstractmethod
+    def similarity(self, a: list[float], b: list[float]) -> float:
+        """Compute cosine similarity between two face embeddings.
+
+        Parameters
+        ----------
+        a:
+            First embedding vector.
+        b:
+            Second embedding vector.
+
+        Returns
+        -------
+        float
+            Cosine similarity in [-1.0, 1.0], where 1.0 means identical,
+            0.0 means orthogonal, -1.0 means opposite, and higher means
+            more alike.
+        """
