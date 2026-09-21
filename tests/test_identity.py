@@ -1,4 +1,4 @@
-"""Tests for M3 — identity check.
+"""Tests for M3 — identity check and bipartite optimal assignment.
 
 All tests:
   - use no network and no GPU (AGENTS.md quality bar);
@@ -7,7 +7,7 @@ All tests:
     are never downloaded;
   - are deterministic;
   - cover defect detection, all abstention paths, calibration differences,
-    input immutability, and router integration.
+    input immutability, bipartite assignment, and router integration.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import tempfile
 import unittest
 import zlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from frame_jury.backends.base import Detection, FaceBackend
 from frame_jury.backends.face_yunet_sface import YuNetSFaceBackend
@@ -29,11 +29,14 @@ from frame_jury.checks.identity import run_identity_check
 from frame_jury.contract import (
     DEFECT_DUPLICATED_CHARACTER,
     DEFECT_WRONG_IDENTITY,
+    Abstention,
     Entity,
+    Finding,
     JuryRequest,
     SCHEMA_VERSION,
     Shot,
     Staging,
+    VerdictBuilder,
 )
 from frame_jury.jury import judge
 
@@ -72,6 +75,11 @@ class FakeFaceBackend(FaceBackend):
         reference_embedding: list[float] | None = None,
         name: str = "fake-face-backend",
         sha256: str = "0" * 64,
+        ref_embed_map: dict[str, list[float]] | None = None,
+        frame_embed_map: dict[tuple[int, int, int, int], list[float]] | None = None,
+        frame_embeddings: dict[tuple[int, int, int, int], list[float]] | None = None,
+        ref_embeddings: dict[str, list[float]] | None = None,
+        similarity_fn: Callable[[list[float], list[float]], float] | None = None,
     ) -> None:
         self._frame_faces = (
             frame_faces
@@ -90,6 +98,9 @@ class FakeFaceBackend(FaceBackend):
         self._frame_emb = frame_embedding if frame_embedding is not None else [0.8, 0.6, 0.0]
         self._backend_name = name
         self._sha256 = sha256
+        self._ref_embed_map = ref_embed_map or ref_embeddings
+        self._frame_embed_map = frame_embed_map or frame_embeddings
+        self._similarity_fn = similarity_fn
         self.detect_calls: list[str] = []
         self.embed_calls: list[str] = []
 
@@ -112,10 +123,18 @@ class FakeFaceBackend(FaceBackend):
         p = str(image_path)
         self.embed_calls.append(p)
         if "ref" in p:
+            if self._ref_embed_map:
+                for k, v in self._ref_embed_map.items():
+                    if k in p:
+                        return list(v)
             return list(self._ref_emb)
+        if self._frame_embed_map and box in self._frame_embed_map:
+            return list(self._frame_embed_map[box])
         return list(self._frame_emb)
 
     def similarity(self, a: list[float], b: list[float]) -> float:
+        if self._similarity_fn is not None:
+            return self._similarity_fn(a, b)
         dot = sum(x * y for x, y in zip(a, b))
         norm_a = math.sqrt(sum(x * x for x in a))
         norm_b = math.sqrt(sum(x * x for x in b))
@@ -186,11 +205,12 @@ class TestIdentityCheck(unittest.TestCase):
             # Close-up threshold is 0.60, band 0.05 -> below 0.55 triggers wrong_identity.
             backend = FakeFaceBackend.with_target_similarity(0.35)
 
-            findings, measurements, elapsed_ms = run_identity_check(
+            findings, abstentions, measurements, elapsed_ms = run_identity_check(
                 frame_path, shot, backend
             )
 
         self.assertEqual(len(findings), 1)
+        self.assertEqual(len(abstentions), 0)
         f = findings[0]
         self.assertEqual(f.check, "identity")
         self.assertEqual(f.defect, DEFECT_WRONG_IDENTITY)
@@ -208,7 +228,7 @@ class TestIdentityCheck(unittest.TestCase):
         self.assertAlmostEqual(measurements["identity_similarity"], 0.35, places=2)
 
     def test_accept_when_above_threshold(self) -> None:
-        """Similarity above threshold + band produces no defect findings."""
+        """Similarity above threshold + band produces no defect findings and no abstentions."""
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             frame_path = _make_dummy_image(root, "frame.png")
@@ -218,16 +238,17 @@ class TestIdentityCheck(unittest.TestCase):
             # Close-up threshold is 0.60, band 0.05 -> 0.85 is safely above threshold.
             backend = FakeFaceBackend.with_target_similarity(0.85)
 
-            findings, measurements, elapsed_ms = run_identity_check(
+            findings, abstentions, measurements, elapsed_ms = run_identity_check(
                 frame_path, shot, backend
             )
 
         self.assertEqual(findings, [])
+        self.assertEqual(abstentions, [])
         self.assertAlmostEqual(measurements["identity_similarity"], 0.85, places=2)
         self.assertNotIn("identity_abstain_reason", measurements)
 
     def test_no_face_in_frame_abstains(self) -> None:
-        """No face in frame abstains with warning finding and reason in measurements."""
+        """No face in frame emits first-class Abstention and reason in measurements."""
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             frame_path = _make_dummy_image(root, "frame.png")
@@ -236,16 +257,18 @@ class TestIdentityCheck(unittest.TestCase):
             shot = _make_shot(framing="close-up", reference_images=(str(ref_path),))
             backend = FakeFaceBackend(frame_faces=[])
 
-            findings, measurements, _ = run_identity_check(frame_path, shot, backend)
+            findings, abstentions, measurements, _ = run_identity_check(frame_path, shot, backend)
 
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0].severity, "warning")
-        self.assertEqual(findings[0].defect, DEFECT_WRONG_IDENTITY)
+        self.assertEqual(findings, [])
+        self.assertEqual(len(abstentions), 1)
+        self.assertEqual(abstentions[0].check, "identity")
+        self.assertEqual(abstentions[0].reason, "no_face_in_frame")
+        self.assertEqual(abstentions[0].entity_id, "char-vigia")
         self.assertTrue(measurements.get("identity_abstain"))
         self.assertEqual(measurements.get("identity_abstain_reason"), "no_face_in_frame")
 
     def test_no_face_in_reference_image_abstains(self) -> None:
-        """No face in reference image abstains with warning finding and reason."""
+        """No face in reference image emits first-class Abstention and reason."""
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             frame_path = _make_dummy_image(root, "frame.png")
@@ -254,16 +277,18 @@ class TestIdentityCheck(unittest.TestCase):
             shot = _make_shot(framing="close-up", reference_images=(str(ref_path),))
             backend = FakeFaceBackend(reference_faces=[])
 
-            findings, measurements, _ = run_identity_check(frame_path, shot, backend)
+            findings, abstentions, measurements, _ = run_identity_check(frame_path, shot, backend)
 
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0].severity, "warning")
-        self.assertEqual(findings[0].defect, DEFECT_WRONG_IDENTITY)
+        self.assertEqual(findings, [])
+        self.assertEqual(len(abstentions), 1)
+        self.assertEqual(abstentions[0].check, "identity")
+        self.assertEqual(abstentions[0].reason, "no_face_in_reference")
+        self.assertEqual(abstentions[0].entity_id, "char-vigia")
         self.assertTrue(measurements.get("identity_abstain"))
         self.assertEqual(measurements.get("identity_abstain_reason"), "no_face_in_reference")
 
     def test_no_reference_image_declared_abstains(self) -> None:
-        """Entity without reference_images abstains with warning finding."""
+        """Entity without reference_images emits first-class Abstention."""
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             frame_path = _make_dummy_image(root, "frame.png")
@@ -271,16 +296,18 @@ class TestIdentityCheck(unittest.TestCase):
             shot = _make_shot(framing="close-up", reference_images=())
             backend = FakeFaceBackend()
 
-            findings, measurements, _ = run_identity_check(frame_path, shot, backend)
+            findings, abstentions, measurements, _ = run_identity_check(frame_path, shot, backend)
 
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0].severity, "warning")
-        self.assertEqual(findings[0].defect, DEFECT_WRONG_IDENTITY)
+        self.assertEqual(findings, [])
+        self.assertEqual(len(abstentions), 1)
+        self.assertEqual(abstentions[0].check, "identity")
+        self.assertEqual(abstentions[0].reason, "no_reference_image")
+        self.assertEqual(abstentions[0].entity_id, "char-vigia")
         self.assertTrue(measurements.get("identity_abstain"))
         self.assertEqual(measurements.get("identity_abstain_reason"), "no_reference_image")
 
     def test_ambiguous_band_around_threshold_abstains(self) -> None:
-        """Similarity inside ambiguous band abstains (warning finding) rather than guessing."""
+        """Similarity inside ambiguous band emits first-class Abstention rather than guessing."""
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             frame_path = _make_dummy_image(root, "frame.png")
@@ -290,10 +317,13 @@ class TestIdentityCheck(unittest.TestCase):
             # Close-up threshold 0.60, band 0.05 -> [0.55, 0.65] is ambiguous band.
             backend = FakeFaceBackend.with_target_similarity(0.61)
 
-            findings, measurements, _ = run_identity_check(frame_path, shot, backend)
+            findings, abstentions, measurements, _ = run_identity_check(frame_path, shot, backend)
 
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0].severity, "warning")
+        self.assertEqual(findings, [])
+        self.assertEqual(len(abstentions), 1)
+        self.assertEqual(abstentions[0].check, "identity")
+        self.assertEqual(abstentions[0].reason, "ambiguous_band")
+        self.assertEqual(abstentions[0].entity_id, "char-vigia")
         self.assertTrue(measurements.get("identity_abstain"))
         self.assertEqual(measurements.get("identity_abstain_reason"), "ambiguous_band")
 
@@ -317,13 +347,15 @@ class TestIdentityCheck(unittest.TestCase):
             backend = FakeFaceBackend.with_target_similarity(0.52)
 
             shot_close = _make_shot(framing="close-up", reference_images=(str(ref_path),))
-            findings_close, _, _ = run_identity_check(frame_path, shot_close, backend, calibration=cal)
+            findings_close, abstentions_close, _, _ = run_identity_check(frame_path, shot_close, backend, calibration=cal)
             self.assertEqual(len(findings_close), 1)
+            self.assertEqual(len(abstentions_close), 0)
             self.assertEqual(findings_close[0].severity, "blocking")
 
             shot_wide = _make_shot(framing="wide shot", reference_images=(str(ref_path),))
-            findings_wide, _, _ = run_identity_check(frame_path, shot_wide, backend, calibration=cal)
+            findings_wide, abstentions_wide, _, _ = run_identity_check(frame_path, shot_wide, backend, calibration=cal)
             self.assertEqual(len(findings_wide), 0)
+            self.assertEqual(len(abstentions_wide), 0)
 
     def test_check_never_mutates_inputs(self) -> None:
         """run_identity_check must never modify shot, entities, or paths."""
@@ -345,7 +377,7 @@ class TestIdentityCheck(unittest.TestCase):
             self.assertEqual(cal, cal_clone)
 
     def test_shot_with_no_characters_clean(self) -> None:
-        """Shots without characters return no findings and run cleanly."""
+        """Shots without characters return no findings, no abstentions, and run cleanly."""
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             frame_path = _make_dummy_image(root, "frame.png")
@@ -367,9 +399,199 @@ class TestIdentityCheck(unittest.TestCase):
                 negative_prompt="",
             )
             backend = FakeFaceBackend()
-            findings, measurements, _ = run_identity_check(frame_path, shot, backend)
+            findings, abstentions, measurements, _ = run_identity_check(frame_path, shot, backend)
             self.assertEqual(findings, [])
+            self.assertEqual(abstentions, [])
             self.assertEqual(measurements.get("declared_characters"), 0)
+
+
+class TestBipartiteIdentityAssignment(unittest.TestCase):
+    """Tests for Decision 1 (optimal bipartite assignment) and Decision 2 (first-class abstention)."""
+
+    def _make_two_character_shot(
+        self,
+        ref_a: Path,
+        ref_b: Path,
+        *,
+        framing: str = "close-up",
+    ) -> Shot:
+        return Shot(
+            shot_id="shot-duo",
+            framing=framing,
+            declared_entities=(
+                Entity(
+                    entity_id="char-alice",
+                    kind="character",
+                    display_name="Alice",
+                    aliases=(),
+                    reference_images=(str(ref_a),),
+                ),
+                Entity(
+                    entity_id="char-bob",
+                    kind="character",
+                    display_name="Bob",
+                    aliases=(),
+                    reference_images=(str(ref_b),),
+                ),
+            ),
+            staging=Staging(purpose="two characters", must_render=(), composition=()),
+            positive_prompt="Alice and Bob conversing",
+            negative_prompt="",
+        )
+
+    def test_two_declared_characters_and_two_faces_never_both_assigned_same_face(self) -> None:
+        """Two declared characters competing for the same best face are assigned distinct faces."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            frame_path = _make_dummy_image(root, "frame.png")
+            ref_a = _make_dummy_image(root, "ref_alice.png")
+            ref_b = _make_dummy_image(root, "ref_bob.png")
+
+            shot = self._make_two_character_shot(ref_a, ref_b)
+
+            face_0 = Detection(label="face", confidence=0.95, box=(0, 0, 50, 50))
+            face_1 = Detection(label="face", confidence=0.95, box=(60, 60, 110, 110))
+
+            # Both Alice and Bob have highest similarity to Face 0:
+            # Alice: Face 0 = 0.90, Face 1 = 0.80
+            # Bob:   Face 0 = 0.85, Face 1 = 0.10
+            # Under greedy, both would grab Face 0.
+            # Under Hungarian, Alice -> Face 1 (0.80), Bob -> Face 0 (0.85).
+            def sim_fn(frame_emb: list[float], ref_emb: list[float]) -> float:
+                face_id = int(frame_emb[0])
+                char_id = int(ref_emb[0])
+                table = {
+                    (0, 0): 0.90,  # Face 0, Alice
+                    (1, 0): 0.80,  # Face 1, Alice
+                    (0, 1): 0.85,  # Face 0, Bob
+                    (1, 1): 0.10,  # Face 1, Bob
+                }
+                return table.get((face_id, char_id), 0.0)
+
+            backend = FakeFaceBackend(
+                frame_faces=[face_0, face_1],
+                frame_embeddings={face_0.box: [0.0], face_1.box: [1.0]},
+                ref_embed_map={str(ref_a): [0.0], str(ref_b): [1.0]},
+                similarity_fn=sim_fn,
+            )
+
+            findings, abstentions, measurements, _ = run_identity_check(frame_path, shot, backend)
+
+        # Both characters are assigned distinct faces and both pass threshold (0.80 > 0.65 and 0.85 > 0.65).
+        # Neither produces a false wrong_identity defect!
+        self.assertEqual(findings, [])
+        self.assertEqual(abstentions, [])
+
+    def test_rectangular_more_characters_than_faces_surplus_abstains(self) -> None:
+        """Rectangular case: more characters than faces leaves the surplus character abstaining."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            frame_path = _make_dummy_image(root, "frame.png")
+            ref_a = _make_dummy_image(root, "ref_alice.png")
+            ref_b = _make_dummy_image(root, "ref_bob.png")
+
+            shot = self._make_two_character_shot(ref_a, ref_b)
+
+            # Only ONE face detected in frame:
+            only_face = Detection(label="face", confidence=0.95, box=(10, 10, 60, 60))
+
+            # Alice matches this face well (0.85); Bob matches poorly (0.20)
+            def sim_fn(frame_emb: list[float], ref_emb: list[float]) -> float:
+                char_id = int(ref_emb[0])
+                return 0.85 if char_id == 0 else 0.20
+
+            backend = FakeFaceBackend(
+                frame_faces=[only_face],
+                frame_embeddings={only_face.box: [0.0]},
+                ref_embed_map={str(ref_a): [0.0], str(ref_b): [1.0]},
+                similarity_fn=sim_fn,
+            )
+
+            findings, abstentions, measurements, _ = run_identity_check(frame_path, shot, backend)
+
+        # Alice was assigned the face and matched cleanly.
+        # Bob was left unassigned: surplus abstains (reason: "unassigned_face"), NOT wrong_identity!
+        self.assertEqual(findings, [])
+        self.assertEqual(len(abstentions), 1)
+        self.assertEqual(abstentions[0].check, "identity")
+        self.assertEqual(abstentions[0].reason, "unassigned_face")
+        self.assertEqual(abstentions[0].entity_id, "char-bob")
+
+    def test_assignment_picks_higher_total_over_greedy(self) -> None:
+        """The assignment picks the higher-total pairing over greedy when they differ."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            frame_path = _make_dummy_image(root, "frame.png")
+            ref_a = _make_dummy_image(root, "ref_alice.png")
+            ref_b = _make_dummy_image(root, "ref_bob.png")
+
+            shot = self._make_two_character_shot(ref_a, ref_b)
+
+            face_0 = Detection(label="face", confidence=0.95, box=(0, 0, 50, 50))
+            face_1 = Detection(label="face", confidence=0.95, box=(60, 60, 110, 110))
+
+            # Alice: Face 0 = 0.90, Face 1 = 0.80
+            # Bob:   Face 0 = 0.85, Face 1 = 0.10
+            # Greedy: Alice->Face 0 (0.90), Bob->Face 1 (0.10) => sum = 1.00 (Bob fails threshold 0.60!)
+            # Optimal: Alice->Face 1 (0.80), Bob->Face 0 (0.85) => sum = 1.65 (both pass threshold!)
+            def sim_fn(frame_emb: list[float], ref_emb: list[float]) -> float:
+                face_id = int(frame_emb[0])
+                char_id = int(ref_emb[0])
+                table = {
+                    (0, 0): 0.90,
+                    (1, 0): 0.80,
+                    (0, 1): 0.85,
+                    (1, 1): 0.10,
+                }
+                return table.get((face_id, char_id), 0.0)
+
+            backend = FakeFaceBackend(
+                frame_faces=[face_0, face_1],
+                frame_embeddings={face_0.box: [0.0], face_1.box: [1.0]},
+                ref_embed_map={str(ref_a): [0.0], str(ref_b): [1.0]},
+                similarity_fn=sim_fn,
+            )
+
+            findings, abstentions, measurements, _ = run_identity_check(frame_path, shot, backend)
+
+        # Because optimal bipartite assignment found the higher total (1.65), both pass cleanly.
+        self.assertEqual(findings, [])
+        self.assertEqual(abstentions, [])
+
+    def test_verdict_with_only_abstentions_is_unsure(self) -> None:
+        """A verdict containing only abstentions resolves to unsure (SPEC.md §4)."""
+        b = VerdictBuilder("shot-test-abstain")
+        b.add_abstention(
+            Abstention(
+                check="identity",
+                reason="no_face_in_frame",
+                entity_id="char-vigia",
+                explanation="no face found in frame",
+            )
+        )
+        verdict = b.build()
+        self.assertEqual(verdict.verdict, "unsure")
+        self.assertEqual(len(verdict.findings), 0)
+        self.assertEqual(len(verdict.abstentions), 1)
+
+    def test_verdict_with_warning_and_no_abstention_is_accept(self) -> None:
+        """A verdict with a warning finding and no abstention is accept (SPEC.md §4)."""
+        b = VerdictBuilder("shot-test-warning")
+        b.add_finding(
+            Finding(
+                check="presence",
+                defect="non_blocking_warning",
+                severity="warning",
+                confidence=0.75,
+                evidence={},
+                explanation="a non-blocking defect occurred",
+            )
+        )
+        verdict = b.build()
+        self.assertEqual(verdict.verdict, "accept")
+        self.assertEqual(len(verdict.findings), 1)
+        self.assertEqual(verdict.findings[0].severity, "warning")
+        self.assertEqual(len(verdict.abstentions), 0)
 
 
 class TestJuryIdentityIntegration(unittest.TestCase):
@@ -400,11 +622,12 @@ class TestJuryIdentityIntegration(unittest.TestCase):
         self.assertEqual(verdict.verdict, "reject")
         self.assertEqual(len(verdict.findings), 1)
         self.assertEqual(verdict.findings[0].defect, DEFECT_WRONG_IDENTITY)
+        self.assertEqual(len(verdict.abstentions), 0)
         self.assertIn("identity", verdict.timings_ms)
         self.assertTrue(any(det["check"] == "identity" for det in verdict.detectors))
 
     def test_judge_unsure_on_identity_abstain(self) -> None:
-        """Verdict is unsure when identity check abstains."""
+        """Verdict is unsure when identity check abstains via Abstention."""
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             frame = _make_dummy_image(root, "frame.png")
@@ -417,8 +640,10 @@ class TestJuryIdentityIntegration(unittest.TestCase):
             verdict = judge(request, face_backend=backend)
 
         self.assertEqual(verdict.verdict, "unsure")
-        self.assertEqual(len(verdict.findings), 1)
-        self.assertEqual(verdict.findings[0].severity, "warning")
+        self.assertEqual(len(verdict.findings), 0)
+        self.assertEqual(len(verdict.abstentions), 1)
+        self.assertEqual(verdict.abstentions[0].check, "identity")
+        self.assertEqual(verdict.abstentions[0].reason, "no_face_in_frame")
 
     def test_cheap_budget_early_stop_presence_before_identity(self) -> None:
         """Cheap budget stops after blocking presence defect; identity is not run."""

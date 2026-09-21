@@ -98,13 +98,14 @@ def judge(
         if check_name == "presence":
             if resolved_detector is None:
                 resolved_detector = _resolve_detector(detector)
-            findings, measurements, elapsed_ms = run_presence_check(
+            findings, abstentions, measurements, elapsed_ms = run_presence_check(
                 request.image_path,
                 request.shot,
                 resolved_detector,
                 calibration=calibration,
             )
             builder.add_findings(findings)
+            builder.add_abstentions(abstentions)
             builder.update_measurements(measurements)
             builder.record_timing("presence", elapsed_ms)
             builder.record_detector(
@@ -116,13 +117,14 @@ def judge(
         elif check_name == "identity":
             if resolved_face_backend is None:
                 resolved_face_backend = _resolve_face_backend(face_backend)
-            findings, measurements, elapsed_ms = run_identity_check(
+            findings, abstentions, measurements, elapsed_ms = run_identity_check(
                 request.image_path,
                 request.shot,
                 resolved_face_backend,
                 calibration=calibration,
             )
             builder.add_findings(findings)
+            builder.add_abstentions(abstentions)
             builder.update_measurements(measurements)
             builder.record_timing("identity", elapsed_ms)
             builder.record_detector(

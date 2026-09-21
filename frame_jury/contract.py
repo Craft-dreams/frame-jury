@@ -294,6 +294,40 @@ class Finding:
 
 
 @dataclass
+class Abstention:
+    """A distinct, first-class record of a check abstaining (SPEC.md §4).
+
+    An abstention is not a finding: a defect is something wrong with the frame,
+    an abstention is something the judge could not determine.
+    """
+
+    check: str            # which check abstained
+    reason: str           # a stable machine-readable slug, e.g. "no_face_in_frame"
+    entity_id: str = ""   # the entity it could not judge, if any
+    explanation: str = "" # one human-readable sentence
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "check": self.check,
+            "reason": self.reason,
+        }
+        if self.entity_id:
+            d["entity_id"] = self.entity_id
+        if self.explanation:
+            d["explanation"] = self.explanation
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Abstention":
+        return cls(
+            check=d["check"],
+            reason=d["reason"],
+            entity_id=d.get("entity_id", ""),
+            explanation=d.get("explanation", ""),
+        )
+
+
+@dataclass
 class Verdict:
     """The result of judging one frame.
 
@@ -308,6 +342,7 @@ class Verdict:
     verdict: Literal["accept", "reject", "unsure"]
     confidence: float                       # aggregate confidence in the verdict
     findings: list[Finding] = field(default_factory=list)
+    abstentions: list[Abstention] = field(default_factory=list)
     measurements: dict[str, Any] = field(default_factory=dict)
     timings_ms: dict[str, float] = field(default_factory=dict)
     detectors: list[dict[str, Any]] = field(default_factory=list)
@@ -319,6 +354,7 @@ class Verdict:
             "verdict": self.verdict,
             "confidence": round(self.confidence, 4),
             "findings": [f.to_dict() for f in self.findings],
+            "abstentions": [a.to_dict() for a in self.abstentions],
             "measurements": self.measurements,
             "timings_ms": self.timings_ms,
             "detectors": self.detectors,
@@ -343,6 +379,7 @@ class Verdict:
             verdict=v,  # type: ignore[arg-type]
             confidence=float(d.get("confidence", 0.0)),
             findings=[Finding.from_dict(f) for f in d.get("findings", [])],
+            abstentions=[Abstention.from_dict(a) for a in d.get("abstentions", [])],
             measurements=d.get("measurements", {}),
             timings_ms=d.get("timings_ms", {}),
             detectors=d.get("detectors", []),
@@ -363,12 +400,13 @@ class Verdict:
 
 
 class VerdictBuilder:
-    """Accumulates findings from multiple checks and emits a Verdict.
+    """Accumulates findings and abstentions from multiple checks and emits a Verdict.
 
     The final verdict:
     - is ``reject`` when any finding has severity ``blocking``;
-    - is ``unsure`` when any finding has severity ``warning`` and none block;
-    - is ``accept`` otherwise.
+    - is ``unsure`` when any check emits an abstention and none block;
+    - is ``accept`` otherwise.  A ``warning`` finding on its own produces
+      ``accept`` with warnings attached (SPEC.md §4).
 
     Confidence is the minimum confidence across all findings (conservative: the
     verdict is only as strong as its weakest piece of evidence).
@@ -377,6 +415,7 @@ class VerdictBuilder:
     def __init__(self, shot_id: str) -> None:
         self._shot_id = shot_id
         self._findings: list[Finding] = []
+        self._abstentions: list[Abstention] = []
         self._measurements: dict[str, Any] = {}
         self._timings_ms: dict[str, float] = {}
         self._detectors: list[dict[str, Any]] = []
@@ -387,6 +426,12 @@ class VerdictBuilder:
 
     def add_findings(self, findings: list[Finding]) -> None:
         self._findings.extend(findings)
+
+    def add_abstention(self, abstention: Abstention) -> None:
+        self._abstentions.append(abstention)
+
+    def add_abstentions(self, abstentions: list[Abstention]) -> None:
+        self._abstentions.extend(abstentions)
 
     def update_measurements(self, measurements: dict[str, Any]) -> None:
         self._measurements.update(measurements)
@@ -402,7 +447,7 @@ class VerdictBuilder:
     def build(self) -> Verdict:
         if any(f.severity == "blocking" for f in self._findings):
             verdict: Literal["accept", "reject", "unsure"] = "reject"
-        elif any(f.severity == "warning" for f in self._findings):
+        elif self._abstentions:
             verdict = "unsure"
         else:
             verdict = "accept"
@@ -416,6 +461,7 @@ class VerdictBuilder:
             verdict=verdict,
             confidence=confidence,
             findings=list(self._findings),
+            abstentions=list(self._abstentions),
             measurements=dict(self._measurements),
             timings_ms=dict(self._timings_ms),
             detectors=list(self._detectors),

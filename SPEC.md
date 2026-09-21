@@ -128,6 +128,11 @@ adapter will speak exactly it.
       "explanation": "the shot declares one character and two people are in frame",
       "prompt_hint": "state that exactly one person is in frame; add a second person to the negative prompt" }
   ],
+  "abstentions": [
+    { "check": "identity", "reason": "no_face_in_frame",
+      "entity_id": "char-vigia",
+      "explanation": "no face detected in frame; cannot verify identity for 'O vigia'" }
+  ],
   "measurements": { "faces": 2, "people": 2, "identity_similarity": 0.41 },
   "timings_ms": { "presence": 120, "identity": 90 },
   "detectors": [ { "check": "presence", "backend": "rtdetr-r50", "weights_sha256": "…" } ]
@@ -139,8 +144,19 @@ Rules the verdict must obey:
 - **every finding carries its evidence** — the numbers that produced it, not
   only a label. A verdict nobody can audit is worthless to the factory, whose
   rule is that a failed gate must preserve enough evidence to diagnose it;
-- **`unsure` is a first-class answer.** A judge that guesses is worse than one
-  that abstains, because the factory would learn to ignore it;
+- **`unsure` is a first-class answer, and an abstention is not a finding.**
+  A defect is something wrong with the frame; an abstention is something the
+  judge could not determine (e.g. no face found, ambiguous similarity, or fewer
+  faces than characters). Abstentions are recorded in a first-class `abstentions`
+  field. Any `blocking` finding produces `reject`; otherwise any abstention
+  produces `unsure`; otherwise `accept`. A `warning` finding on its own does not
+  produce `unsure` — it is a real but non-blocking defect, and an `accept` may
+  carry warnings;
+- **identity assignment is bipartite, one-to-one and optimal.** Characters are
+  assigned to detected faces by maximising total similarity (Hungarian algorithm),
+  not greedily or independently. Each declared character is judged against its
+  assigned face only. Surplus characters left unassigned when there are fewer
+  faces than characters result in an abstention, not a `wrong_identity`;
 - **`prompt_hint` is a suggestion for a human or a station, never an edit.**
   frame-jury never rewrites a prompt;
 - deterministic: the same image and declaration give the same verdict, with

@@ -89,6 +89,7 @@ class _StubDetector(DetectorBackend):
 
 from frame_jury.contract import (  # noqa: E402
     SCHEMA_VERSION,
+    Abstention,
     ContractError,
     Entity,
     Finding,
@@ -313,8 +314,8 @@ class TestVerdictBuilder(unittest.TestCase):
         v = b.build()
         self.assertEqual(v.verdict, "reject")
 
-    def test_warning_only_gives_unsure(self) -> None:
-        """unsure is returned when only warning-severity findings exist."""
+    def test_warning_only_gives_accept(self) -> None:
+        """A warning finding on its own produces accept with warnings (SPEC.md §4)."""
         b = VerdictBuilder("shot-001")
         b.add_finding(
             Finding(
@@ -323,11 +324,27 @@ class TestVerdictBuilder(unittest.TestCase):
                 severity="warning",
                 confidence=0.6,
                 evidence={},
+                explanation="non-blocking issue",
+            )
+        )
+        v = b.build()
+        self.assertEqual(v.verdict, "accept")
+        self.assertEqual(len(v.findings), 1)
+
+    def test_abstention_only_gives_unsure(self) -> None:
+        """unsure is returned when only abstentions exist (SPEC.md §4)."""
+        b = VerdictBuilder("shot-001")
+        b.add_abstention(
+            Abstention(
+                check="presence",
+                reason="no_person_in_frame",
+                entity_id="char-001",
                 explanation="abstaining on zero detections",
             )
         )
         v = b.build()
         self.assertEqual(v.verdict, "unsure")
+        self.assertEqual(len(v.abstentions), 1)
 
     def test_blocking_beats_warning(self) -> None:
         b = VerdictBuilder("shot-001")
@@ -475,32 +492,35 @@ class TestPresenceCheck(unittest.TestCase):
 
         try:
             cal = CalibrationFile.load(tmp_path)
-            findings, measurements, elapsed_ms = run_presence_check(
+            findings, abstentions, measurements, elapsed_ms = run_presence_check(
                 image, shot, detector, calibration=cal
             )
         finally:
             tmp_path.unlink(missing_ok=True)
 
-        return findings, measurements, elapsed_ms
+        return findings, abstentions, measurements, elapsed_ms
 
     def test_correct_count_no_findings(self) -> None:
         """1 declared, 1 detected → no findings (SPEC.md §5)."""
         with tempfile.TemporaryDirectory() as d:
-            findings, measurements, _ = self._run(Path(d), declared_characters=1, detected_people=1)
+            findings, abstentions, measurements, _ = self._run(Path(d), declared_characters=1, detected_people=1)
         self.assertEqual(findings, [])
+        self.assertEqual(abstentions, [])
         self.assertEqual(measurements["people_detected"], 1)
 
     def test_correct_count_two_characters(self) -> None:
         """2 declared, 2 detected → no findings."""
         with tempfile.TemporaryDirectory() as d:
-            findings, _, _ = self._run(Path(d), declared_characters=2, detected_people=2)
+            findings, abstentions, _, _ = self._run(Path(d), declared_characters=2, detected_people=2)
         self.assertEqual(findings, [])
+        self.assertEqual(abstentions, [])
 
     def test_duplicated_character(self) -> None:
         """1 declared, 2 detected → duplicated_character (SPEC.md §5)."""
         with tempfile.TemporaryDirectory() as d:
-            findings, measurements, _ = self._run(Path(d), declared_characters=1, detected_people=2)
+            findings, abstentions, measurements, _ = self._run(Path(d), declared_characters=1, detected_people=2)
         self.assertEqual(len(findings), 1)
+        self.assertEqual(abstentions, [])
         self.assertEqual(findings[0].defect, "duplicated_character")
         self.assertEqual(findings[0].severity, "blocking")
         self.assertIn("people_detected", findings[0].evidence)
@@ -513,73 +533,81 @@ class TestPresenceCheck(unittest.TestCase):
     def test_extra_person_no_character_declared(self) -> None:
         """0 declared, 1 detected → extra_person (SPEC.md §5)."""
         with tempfile.TemporaryDirectory() as d:
-            findings, _, _ = self._run(Path(d), declared_characters=0, detected_people=1)
+            findings, abstentions, _, _ = self._run(Path(d), declared_characters=0, detected_people=1)
         self.assertEqual(len(findings), 1)
+        self.assertEqual(abstentions, [])
         self.assertEqual(findings[0].defect, "extra_person")
         self.assertEqual(findings[0].severity, "blocking")
 
     def test_extra_person_multiple(self) -> None:
         """0 declared, 3 detected → extra_person."""
         with tempfile.TemporaryDirectory() as d:
-            findings, _, _ = self._run(Path(d), declared_characters=0, detected_people=3)
+            findings, abstentions, _, _ = self._run(Path(d), declared_characters=0, detected_people=3)
         self.assertEqual(len(findings), 1)
+        self.assertEqual(abstentions, [])
         self.assertEqual(findings[0].defect, "extra_person")
         self.assertEqual(findings[0].evidence["people_detected"], 3)
 
     def test_missing_entity_abstain_by_default(self) -> None:
-        """1 declared, 0 detected → unsure (warning severity) when abstain=True."""
+        """1 declared, 0 detected → unsure (first-class Abstention) when abstain=True."""
         with tempfile.TemporaryDirectory() as d:
-            findings, _, _ = self._run(
+            findings, abstentions, _, _ = self._run(
                 Path(d), declared_characters=1, detected_people=0, abstain_on_empty=True
             )
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0].defect, "missing_entity")
-        self.assertEqual(findings[0].severity, "warning")  # not blocking → unsure
+        self.assertEqual(findings, [])
+        self.assertEqual(len(abstentions), 1)
+        self.assertEqual(abstentions[0].check, "presence")
+        self.assertEqual(abstentions[0].reason, "no_person_in_frame")
+        self.assertEqual(abstentions[0].entity_id, "char-000")
 
     def test_missing_entity_blocking_when_abstain_false(self) -> None:
         """1 declared, 0 detected → reject (blocking severity) when abstain=False."""
         with tempfile.TemporaryDirectory() as d:
-            findings, _, _ = self._run(
+            findings, abstentions, _, _ = self._run(
                 Path(d), declared_characters=1, detected_people=0, abstain_on_empty=False
             )
         self.assertEqual(len(findings), 1)
+        self.assertEqual(abstentions, [])
         self.assertEqual(findings[0].defect, "missing_entity")
         self.assertEqual(findings[0].severity, "blocking")
 
     def test_no_character_no_person_clean(self) -> None:
         """0 declared, 0 detected → no findings."""
         with tempfile.TemporaryDirectory() as d:
-            findings, _, _ = self._run(Path(d), declared_characters=0, detected_people=0)
+            findings, abstentions, _, _ = self._run(Path(d), declared_characters=0, detected_people=0)
         self.assertEqual(findings, [])
+        self.assertEqual(abstentions, [])
 
     def test_findings_carry_evidence(self) -> None:
         """Every finding must carry its evidence numbers (SPEC.md §4)."""
         with tempfile.TemporaryDirectory() as d:
-            findings, _, _ = self._run(Path(d), declared_characters=1, detected_people=2)
+            findings, _, _, _ = self._run(Path(d), declared_characters=1, detected_people=2)
         self.assertTrue(all("people_detected" in f.evidence for f in findings))
         self.assertTrue(all("declared_characters" in f.evidence for f in findings))
 
     def test_prompt_hint_present(self) -> None:
         """prompt_hint must be set on every finding (SPEC.md §4)."""
         with tempfile.TemporaryDirectory() as d:
-            findings, _, _ = self._run(Path(d), declared_characters=1, detected_people=2)
+            findings, _, _, _ = self._run(Path(d), declared_characters=1, detected_people=2)
         self.assertTrue(all(f.prompt_hint for f in findings))
 
     def test_elapsed_ms_is_positive(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            _, _, elapsed = self._run(Path(d), declared_characters=1, detected_people=1)
+            _, _, _, elapsed = self._run(Path(d), declared_characters=1, detected_people=1)
         self.assertGreater(elapsed, 0.0)
 
-    def test_two_declared_zero_detected_two_findings(self) -> None:
-        """Two characters declared, zero detected → one finding per character."""
+    def test_two_declared_zero_detected_two_abstentions(self) -> None:
+        """Two characters declared, zero detected → one abstention per character."""
         with tempfile.TemporaryDirectory() as d:
-            findings, _, _ = self._run(
+            findings, abstentions, _, _ = self._run(
                 Path(d), declared_characters=2, detected_people=0, abstain_on_empty=True
             )
-        self.assertEqual(len(findings), 2)
-        self.assertTrue(all(f.defect == "missing_entity" for f in findings))
+        self.assertEqual(findings, [])
+        self.assertEqual(len(abstentions), 2)
+        self.assertTrue(all(a.check == "presence" for a in abstentions))
+        self.assertTrue(all(a.reason == "no_person_in_frame" for a in abstentions))
         # Entity ids must differ.
-        entity_ids = [f.entity_id for f in findings]
+        entity_ids = [a.entity_id for a in abstentions]
         self.assertEqual(len(set(entity_ids)), 2)
 
 
