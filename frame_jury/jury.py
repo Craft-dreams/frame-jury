@@ -40,8 +40,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from frame_jury.backends.base import DetectorBackend
+from frame_jury.backends.base import DetectorBackend, FaceBackend
 from frame_jury.calibration.thresholds import CalibrationFile, load_defaults
+from frame_jury.checks.identity import run_identity_check
 from frame_jury.checks.presence import run_presence_check
 from frame_jury.contract import JuryRequest, Verdict, VerdictBuilder
 
@@ -53,6 +54,7 @@ def judge(
     request: JuryRequest,
     *,
     detector: DetectorBackend | None = None,
+    face_backend: FaceBackend | None = None,
     calibration: CalibrationFile | None = None,
 ) -> Verdict:
     """Judge one frame against its declaration.
@@ -65,6 +67,10 @@ def judge(
         Object-detection backend.  If *None*, the torchvision backend is
         constructed on first use (lazy import so tests that mock the detector
         never load torch).
+    face_backend:
+        Face detection and embedding backend. If *None*, the YuNet+SFace backend
+        is constructed on first use (lazy import so tests that mock the backend
+        never load OpenCV).
     calibration:
         Calibration thresholds.  If *None*, the shipped defaults are used.
 
@@ -80,8 +86,9 @@ def judge(
     checks_requested = set(request.checks) if request.checks else set(_CHEAP_FIRST_ORDER)
     budget = request.budget
 
-    # Resolve the detector lazily so tests can avoid importing torch.
-    resolved_detector = _resolve_detector(detector)
+    # Resolve backends lazily so tests can avoid importing heavy dependencies.
+    resolved_detector: DetectorBackend | None = None
+    resolved_face_backend: FaceBackend | None = None
 
     # Run checks in cheap-first order.
     for check_name in _CHEAP_FIRST_ORDER:
@@ -89,6 +96,8 @@ def judge(
             continue
 
         if check_name == "presence":
+            if resolved_detector is None:
+                resolved_detector = _resolve_detector(detector)
             findings, measurements, elapsed_ms = run_presence_check(
                 request.image_path,
                 request.shot,
@@ -105,8 +114,22 @@ def judge(
             )
 
         elif check_name == "identity":
-            # M3 — not yet implemented.
-            pass
+            if resolved_face_backend is None:
+                resolved_face_backend = _resolve_face_backend(face_backend)
+            findings, measurements, elapsed_ms = run_identity_check(
+                request.image_path,
+                request.shot,
+                resolved_face_backend,
+                calibration=calibration,
+            )
+            builder.add_findings(findings)
+            builder.update_measurements(measurements)
+            builder.record_timing("identity", elapsed_ms)
+            builder.record_detector(
+                "identity",
+                resolved_face_backend.name(),
+                resolved_face_backend.weights_sha256(),
+            )
 
         elif check_name == "anatomy":
             # M5 — not yet implemented.
@@ -139,3 +162,16 @@ def _resolve_detector(detector: DetectorBackend | None) -> DetectorBackend:
     from frame_jury.backends.detector_torchvision import TorchvisionDetector
 
     return TorchvisionDetector()
+
+
+def _resolve_face_backend(face_backend: FaceBackend | None) -> FaceBackend:
+    """Return *face_backend* if provided, otherwise construct the default backend.
+
+    The default is YuNet+SFace (MIT / Apache-2.0). The import is deferred so that
+    tests that pass a stub face backend never import cv2.
+    """
+    if face_backend is not None:
+        return face_backend
+    from frame_jury.backends.face_yunet_sface import YuNetSFaceBackend
+
+    return YuNetSFaceBackend()

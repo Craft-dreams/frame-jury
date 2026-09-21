@@ -38,6 +38,11 @@ class FramingThresholds:
     duplicated_character_confidence: float
     missing_entity_confidence: float
 
+    # Identity thresholds (M3)
+    identity_similarity_threshold: float = 0.55
+    identity_ambiguous_band: float = 0.05
+    identity_confidence: float = 0.85
+
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "FramingThresholds":
         return cls(
@@ -46,6 +51,9 @@ class FramingThresholds:
             extra_person_confidence=float(d["extra_person_confidence"]),
             duplicated_character_confidence=float(d["duplicated_character_confidence"]),
             missing_entity_confidence=float(d["missing_entity_confidence"]),
+            identity_similarity_threshold=float(d.get("identity_similarity_threshold", 0.55)),
+            identity_ambiguous_band=float(d.get("identity_ambiguous_band", 0.05)),
+            identity_confidence=float(d.get("identity_confidence", 0.85)),
         )
 
 

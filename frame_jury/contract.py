@@ -36,6 +36,9 @@ DEFECT_DUPLICATED_CHARACTER = "duplicated_character"
 DEFECT_EXTRA_PERSON = "extra_person"
 DEFECT_MISSING_ENTITY = "missing_entity"
 
+# Identity defects (SPEC.md §5)
+DEFECT_WRONG_IDENTITY = "wrong_identity"
+
 
 # ──────────────────────────────────────────────────────────
 # Request side
