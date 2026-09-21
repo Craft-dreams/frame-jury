@@ -47,6 +47,7 @@ from frame_jury.contract import (
     DEFECT_DUPLICATED_CHARACTER,
     DEFECT_EXTRA_PERSON,
     DEFECT_MISSING_ENTITY,
+    Abstention,
     Finding,
     Shot,
 )
@@ -60,8 +61,8 @@ def run_presence_check(
     detector: DetectorBackend,
     *,
     calibration: CalibrationFile | None = None,
-) -> tuple[list[Finding], dict[str, Any], float]:
-    """Run the presence check and return findings, measurements, elapsed_ms.
+) -> tuple[list[Finding], list[Abstention], dict[str, Any], float]:
+    """Run the presence check and return findings, abstentions, measurements, elapsed_ms.
 
     Parameters
     ----------
@@ -82,6 +83,8 @@ def run_presence_check(
     -------
     findings:
         Zero or more :class:`~frame_jury.contract.Finding` instances.
+    abstentions:
+        Zero or more :class:`~frame_jury.contract.Abstention` instances.
     measurements:
         A dict of raw numbers to merge into the verdict's ``measurements``
         field (e.g. ``{"people": 2, "declared_characters": 1}``).
@@ -114,6 +117,7 @@ def run_presence_check(
     }
 
     findings: list[Finding] = []
+    abstentions: list[Abstention] = []
 
     # ── Case 1: no character declared ───────────────────────────────────────
     # If the shot declares no characters at all but the detector finds a person,
@@ -143,7 +147,7 @@ def run_presence_check(
             )
         # No characters declared and none detected: clean for this check.
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        return findings, measurements, elapsed_ms
+        return findings, abstentions, measurements, elapsed_ms
 
     # ── Case 2: characters declared ─────────────────────────────────────────
 
@@ -181,29 +185,21 @@ def run_presence_check(
     elif people_detected == 0:
         if thresholds.missing_entity_abstain_on_empty:
             # Abstain: we cannot tell a blank image from an extreme wide shot
-            # without labels.  Emit unsure via a warning-severity finding.
+            # without labels. Emit unsure via a first-class Abstention (SPEC.md §4).
+            measurements["presence_abstain"] = True
+            measurements["presence_abstain_reason"] = "no_person_in_frame"
+            measurements["abstain_reason"] = "no_person_in_frame"
             for entity in characters:
-                findings.append(
-                    Finding(
+                abstentions.append(
+                    Abstention(
                         check=_CHECK_NAME,
-                        defect=DEFECT_MISSING_ENTITY,
-                        severity="warning",  # → unsure, not reject
-                        confidence=thresholds.missing_entity_confidence,
-                        evidence={
-                            "people_detected": 0,
-                            "declared_characters": declared_characters,
-                            "boxes": [],
-                        },
+                        reason="no_person_in_frame",
+                        entity_id=entity.entity_id,
                         explanation=(
                             f"no person detected in frame; "
                             f"'{entity.display_name}' was declared — "
                             "detector abstains on zero detections (calibration: "
                             "missing_entity_abstain_on_empty=true)"
-                        ),
-                        entity_id=entity.entity_id,
-                        prompt_hint=(
-                            "ensure the character is visible and not obscured; "
-                            "if this is a wide shot, consider the framing"
                         ),
                     )
                 )
@@ -238,4 +234,4 @@ def run_presence_check(
     # (identity check).
 
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
-    return findings, measurements, elapsed_ms
+    return findings, abstentions, measurements, elapsed_ms

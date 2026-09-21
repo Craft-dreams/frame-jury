@@ -5,18 +5,24 @@ We are not building a blind face recogniser. We have an approved reference image
 (Entity.reference_images) of exactly who the character is supposed to be.
 The reference is the anchor; the model only measures distance to it.
 
-Defect produced (SPEC.md §5):
-  ``wrong_identity``:
-      Face embedding similarity between the frame and the declared character's
-      approved reference image is below the threshold for the shot's camera framing.
+Assignment semantics (SPEC.md §4, Decision 1):
+  Identity assignment is bipartite and optimal, not greedy. We compute the
+  similarity matrix between declared characters and detected faces, and solve
+  for the optimal one-to-one assignment that maximizes total similarity using
+  the Hungarian algorithm (Kuhn-Munkres). Each declared character is judged
+  against its assigned face only.
+  A character left unassigned because there were fewer faces than characters
+  is an abstention, not a wrong_identity defect.
 
-Abstention semantics (SPEC.md §4):
+Abstention semantics (SPEC.md §4, Decision 2):
   "A judge that guesses is worse than one that abstains."
-  The check abstains (emitting unsure via a warning-severity finding) when:
-  - no face is found in the frame;
-  - no face is found in the reference image;
-  - the entity declares no reference image;
-  - or the similarity sits inside an ambiguous band around the threshold.
+  An abstention is a distinct, first-class field rather than a warning-severity finding.
+  The check abstains (emitting unsure via an Abstention) when:
+  - no face is found in the frame (reason: "no_face_in_frame");
+  - no face is found in the reference image (reason: "no_face_in_reference");
+  - the entity declares no reference image (reason: "no_reference_image");
+  - the similarity sits inside an ambiguous band around the threshold (reason: "ambiguous_band");
+  - or fewer faces than characters leave the surplus unassigned (reason: "unassigned_face").
   Each abstention states its reason in measurements.
 """
 
@@ -28,8 +34,10 @@ from typing import Any
 
 from frame_jury.backends.base import FaceBackend
 from frame_jury.calibration.thresholds import CalibrationFile, load_defaults
+from frame_jury.checks.assignment import best_assignment
 from frame_jury.contract import (
     DEFECT_WRONG_IDENTITY,
+    Abstention,
     Finding,
     Shot,
 )
@@ -43,8 +51,8 @@ def run_identity_check(
     face_backend: FaceBackend,
     *,
     calibration: CalibrationFile | None = None,
-) -> tuple[list[Finding], dict[str, Any], float]:
-    """Run the identity check and return findings, measurements, elapsed_ms.
+) -> tuple[list[Finding], list[Abstention], dict[str, Any], float]:
+    """Run the identity check and return findings, abstentions, measurements, elapsed_ms.
 
     Parameters
     ----------
@@ -63,6 +71,8 @@ def run_identity_check(
     -------
     findings:
         Zero or more :class:`~frame_jury.contract.Finding` instances.
+    abstentions:
+        Zero or more :class:`~frame_jury.contract.Abstention` instances.
     measurements:
         Raw numbers and abstention reasons for the verdict ledger.
     elapsed_ms:
@@ -89,44 +99,34 @@ def run_identity_check(
     # Case 0: No characters declared in this shot.
     if not characters:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        return [], measurements, elapsed_ms
+        return [], [], measurements, elapsed_ms
 
     findings: list[Finding] = []
+    abstentions: list[Abstention] = []
 
     # Detect faces in the frame.
     frame_faces = face_backend.detect_faces(image_path)
     measurements["faces_detected"] = len(frame_faces)
     measurements["faces"] = len(frame_faces)
 
-    # Frame face boxes:
     frame_boxes = [f.to_list() for f in frame_faces]
+
+    # Partition declared characters: those with valid reference faces vs those that abstain upfront.
+    candidate_characters: list[tuple[Any, list[tuple[str, Any]]]] = []
 
     for entity in characters:
         entity_id = entity.entity_id
 
         # Abstain Case 1: Entity declares no reference image.
         if not entity.reference_images:
-            measurements["identity_abstain"] = True
-            measurements["identity_abstain_reason"] = "no_reference_image"
-            measurements["abstain_reason"] = "no_reference_image"
-            findings.append(
-                Finding(
+            abstentions.append(
+                Abstention(
                     check=_CHECK_NAME,
-                    defect=DEFECT_WRONG_IDENTITY,
-                    severity="warning",  # → unsure
-                    confidence=confidence,
-                    evidence={
-                        "entity_id": entity_id,
-                        "reference_images": [],
-                    },
+                    reason="no_reference_image",
+                    entity_id=entity_id,
                     explanation=(
                         f"entity '{entity.display_name}' declares no reference "
                         f"image; identity check abstains"
-                    ),
-                    entity_id=entity_id,
-                    prompt_hint=(
-                        f"provide an approved reference image for '{entity.display_name}' "
-                        f"in the production bible"
                     ),
                 )
             )
@@ -141,156 +141,161 @@ def run_identity_check(
 
         # Abstain Case 2: No face found in reference image(s).
         if not ref_face_candidates:
-            measurements["identity_abstain"] = True
-            measurements["identity_abstain_reason"] = "no_face_in_reference"
-            measurements["abstain_reason"] = "no_face_in_reference"
-            findings.append(
-                Finding(
+            abstentions.append(
+                Abstention(
                     check=_CHECK_NAME,
-                    defect=DEFECT_WRONG_IDENTITY,
-                    severity="warning",  # → unsure
-                    confidence=confidence,
-                    evidence={
-                        "entity_id": entity_id,
-                        "reference_images": list(entity.reference_images),
-                        "faces_in_reference": 0,
-                    },
+                    reason="no_face_in_reference",
+                    entity_id=entity_id,
                     explanation=(
                         f"no face detected in reference image(s) for '{entity.display_name}'; "
                         f"identity check abstains"
                     ),
-                    entity_id=entity_id,
-                    prompt_hint=(
-                        f"ensure the reference image for '{entity.display_name}' "
-                        f"clearly shows the character's face"
-                    ),
                 )
             )
             continue
 
-        # Abstain Case 3: No face found in frame.
-        if not frame_faces:
-            measurements["identity_abstain"] = True
-            measurements["identity_abstain_reason"] = "no_face_in_frame"
-            measurements["abstain_reason"] = "no_face_in_frame"
-            findings.append(
-                Finding(
+        candidate_characters.append((entity, ref_face_candidates))
+
+    # Abstain Case 3: No face found in frame for candidate characters.
+    if candidate_characters and not frame_faces:
+        for entity, _ in candidate_characters:
+            abstentions.append(
+                Abstention(
                     check=_CHECK_NAME,
-                    defect=DEFECT_WRONG_IDENTITY,
-                    severity="warning",  # → unsure
-                    confidence=confidence,
-                    evidence={
-                        "entity_id": entity_id,
-                        "faces_detected": 0,
-                        "boxes": [],
-                    },
+                    reason="no_face_in_frame",
+                    entity_id=entity.entity_id,
                     explanation=(
                         f"no face detected in frame; cannot verify identity for "
                         f"'{entity.display_name}'"
                     ),
-                    entity_id=entity_id,
-                    prompt_hint=(
-                        f"ensure the character's face is visible in frame, "
-                        f"or check whether framing obscured the subject"
-                    ),
                 )
             )
-            continue
 
-        # Both sides have faces: embed and compute pairwise similarity.
-        best_similarity = -2.0
-        best_ref_path = ""
-        best_ref_box: tuple[int, int, int, int] = (0, 0, 0, 0)
-        best_frame_box: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # Both candidate characters and frame faces exist: perform optimal bipartite assignment.
+    elif candidate_characters and frame_faces:
+        # Pre-embed reference faces for each candidate character.
+        ref_embeddings: list[list[tuple[str, tuple[int, int, int, int], list[float]]]] = []
+        for _, ref_faces in candidate_characters:
+            ref_embeddings.append([
+                (r_path, rf.box, face_backend.embed(r_path, rf.box))
+                for r_path, rf in ref_faces
+            ])
 
-        # Cache reference embeddings for candidate faces.
-        ref_embeddings = [
-            (r_path, rf.box, face_backend.embed(r_path, rf.box))
-            for r_path, rf in ref_face_candidates
+        # Pre-embed all detected frame faces once.
+        frame_embeddings = [
+            face_backend.embed(image_path, ff.box)
+            for ff in frame_faces
         ]
 
-        # Embed frame faces and find maximum similarity.
-        for ff in frame_faces:
-            frame_emb = face_backend.embed(image_path, ff.box)
-            for r_path, r_box, r_emb in ref_embeddings:
-                sim = face_backend.similarity(frame_emb, r_emb)
-                if sim > best_similarity:
-                    best_similarity = sim
-                    best_ref_path = r_path
-                    best_ref_box = r_box
-                    best_frame_box = ff.box
+        # Build similarity matrix (cost[i][j] is similarity between character i and frame face j).
+        cost_matrix: list[list[float]] = []
+        pair_details: list[list[tuple[str, tuple[int, int, int, int]]]] = []
 
-        measurements["identity_similarity"] = round(best_similarity, 4)
+        for i in range(len(candidate_characters)):
+            row_sims: list[float] = []
+            row_details: list[tuple[str, tuple[int, int, int, int]]] = []
+            for j in range(len(frame_faces)):
+                best_sim = -2.0
+                best_ref_path = ""
+                best_ref_box = (0, 0, 0, 0)
+                for r_path, r_box, r_emb in ref_embeddings[i]:
+                    sim = face_backend.similarity(frame_embeddings[j], r_emb)
+                    if sim > best_sim:
+                        best_sim = sim
+                        best_ref_path = r_path
+                        best_ref_box = r_box
+                row_sims.append(best_sim)
+                row_details.append((best_ref_path, best_ref_box))
+            cost_matrix.append(row_sims)
+            pair_details.append(row_details)
 
+        # Optimal one-to-one assignment via Hungarian algorithm (Decision 1).
+        assignments = best_assignment(cost_matrix)
+        char_to_face = {char_idx: face_idx for char_idx, face_idx in assignments}
+
+        assigned_similarities: list[float] = []
         lower_band = threshold - band
         upper_band = threshold + band
 
-        # Abstain Case 4: Similarity sits in the ambiguous band around threshold.
-        if lower_band <= best_similarity <= upper_band:
-            measurements["identity_abstain"] = True
-            measurements["identity_abstain_reason"] = "ambiguous_band"
-            measurements["abstain_reason"] = "ambiguous_band"
-            findings.append(
-                Finding(
-                    check=_CHECK_NAME,
-                    defect=DEFECT_WRONG_IDENTITY,
-                    severity="warning",  # → unsure
-                    confidence=confidence,
-                    evidence={
-                        "similarity": round(best_similarity, 4),
-                        "threshold": threshold,
-                        "ambiguous_band": band,
-                        "framing": shot.framing,
-                        "reference_path": best_ref_path,
-                        "reference_image": best_ref_path,
-                        "boxes": [list(best_frame_box)],
-                        "all_frame_boxes": frame_boxes,
-                        "reference_box": list(best_ref_box),
-                    },
-                    explanation=(
-                        f"face similarity {best_similarity:.4f} is inside ambiguous band "
-                        f"[{lower_band:.4f}, {upper_band:.4f}] around threshold {threshold:.4f} "
-                        f"for {shot.framing}; identity check abstains"
-                    ),
-                    entity_id=entity_id,
-                    prompt_hint=(
-                        f"similarity for '{entity.display_name}' is borderline; inspect frame "
-                        f"or provide additional reference views"
-                    ),
-                )
-            )
+        for i, (entity, _) in enumerate(candidate_characters):
+            entity_id = entity.entity_id
 
-        # Case 5: Below threshold → wrong_identity (blocking).
-        elif best_similarity < lower_band:
-            findings.append(
-                Finding(
-                    check=_CHECK_NAME,
-                    defect=DEFECT_WRONG_IDENTITY,
-                    severity="blocking",  # → reject
-                    confidence=confidence,
-                    evidence={
-                        "similarity": round(best_similarity, 4),
-                        "threshold": threshold,
-                        "framing": shot.framing,
-                        "reference_path": best_ref_path,
-                        "reference_image": best_ref_path,
-                        "boxes": [list(best_frame_box)],
-                        "all_frame_boxes": frame_boxes,
-                        "reference_box": list(best_ref_box),
-                    },
-                    explanation=(
-                        f"character '{entity.display_name}' face similarity {best_similarity:.4f} "
-                        f"is below threshold {threshold:.4f} for {shot.framing} framing"
-                    ),
-                    entity_id=entity_id,
-                    prompt_hint=(
-                        f"strengthen visual identity cues for '{entity.display_name}' in prompt, "
-                        f"or check for conflicting styling in negative prompt"
-                    ),
+            if i not in char_to_face:
+                # Rectangular surplus: more characters than faces in frame.
+                # Character left unassigned is an abstention, not a wrong_identity.
+                abstentions.append(
+                    Abstention(
+                        check=_CHECK_NAME,
+                        reason="unassigned_face",
+                        entity_id=entity_id,
+                        explanation=(
+                            f"fewer faces than characters in frame; "
+                            f"'{entity.display_name}' was left unassigned"
+                        ),
+                    )
                 )
-            )
+                continue
 
-        # Case 6: Above upper_band → clean match, no defect finding.
+            j = char_to_face[i]
+            sim = cost_matrix[i][j]
+            assigned_similarities.append(sim)
+            ref_path, ref_box = pair_details[i][j]
+            frame_box = frame_faces[j].box
+
+            # Abstain Case 4: Similarity sits in ambiguous band around threshold.
+            if lower_band <= sim <= upper_band:
+                abstentions.append(
+                    Abstention(
+                        check=_CHECK_NAME,
+                        reason="ambiguous_band",
+                        entity_id=entity_id,
+                        explanation=(
+                            f"face similarity {sim:.4f} is inside ambiguous band "
+                            f"[{lower_band:.4f}, {upper_band:.4f}] around threshold {threshold:.4f} "
+                            f"for {shot.framing}; identity check abstains"
+                        ),
+                    )
+                )
+
+            # Case 5: Below threshold → wrong_identity (blocking defect).
+            elif sim < lower_band:
+                findings.append(
+                    Finding(
+                        check=_CHECK_NAME,
+                        defect=DEFECT_WRONG_IDENTITY,
+                        severity="blocking",
+                        confidence=confidence,
+                        evidence={
+                            "similarity": round(sim, 4),
+                            "threshold": threshold,
+                            "framing": shot.framing,
+                            "reference_path": ref_path,
+                            "reference_image": ref_path,
+                            "boxes": [list(frame_box)],
+                            "all_frame_boxes": frame_boxes,
+                            "reference_box": list(ref_box),
+                        },
+                        explanation=(
+                            f"character '{entity.display_name}' face similarity {sim:.4f} "
+                            f"is below threshold {threshold:.4f} for {shot.framing} framing"
+                        ),
+                        entity_id=entity_id,
+                        prompt_hint=(
+                            f"strengthen visual identity cues for '{entity.display_name}' in prompt, "
+                            f"or check for conflicting styling in negative prompt"
+                        ),
+                    )
+                )
+
+            # Case 6: Above upper_band → clean match, no defect and no abstention.
+
+        if assigned_similarities:
+            measurements["identity_similarity"] = round(min(assigned_similarities), 4)
+
+    if abstentions:
+        measurements["identity_abstain"] = True
+        measurements["identity_abstain_reason"] = abstentions[0].reason
+        measurements["abstain_reason"] = abstentions[0].reason
 
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
-    return findings, measurements, elapsed_ms
+    return findings, abstentions, measurements, elapsed_ms
