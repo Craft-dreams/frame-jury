@@ -87,6 +87,29 @@ what is preserved instead:
 - **Never invent a milestone.** Build the one in the brief. A good idea found on
   the way is written into the PR as a suggestion, not implemented.
 
+## This repository is public
+
+`Craft-dreams/frame-jury` is public, and an implementer here can merge its own
+work. So a mistake is not a local mistake — it is published, and a pushed secret
+stays in the history after the file is deleted.
+
+- **No key, token or credential in the repository, ever.** Not in code, not in a
+  test, not in a README example, not in a commit message, not in a `.env` that
+  someone forgets is tracked. The `.env` pattern is already in `.gitignore`;
+  keep it there.
+- The optional VLM backend (`budget=full`, SPEC §6) is the one component that
+  needs a credential. It reads it from the environment at call time, has no
+  default, and **skips its tests when the variable is absent** rather than
+  carrying a fallback value. No test may require a key to pass, which the
+  existing rule that tests need no network already implies.
+- Example configuration is written with an obvious placeholder
+  (`FRAME_JURY_VLM_API_KEY=<your key>`), never a real-looking string.
+- Nothing about the operator's runs is published: no image, no run path, no
+  case file. Absolute machine paths live in gitignored case files, not in
+  committed code or documentation.
+- If a secret is ever pushed, say so immediately in the PR and treat the key as
+  burned — rotate it. Deleting the file does not remove it from the history.
+
 ## Why the labels are not blocking this
 
 The operator has no desk time to label, so the 300 labels M1 needs do not exist.
