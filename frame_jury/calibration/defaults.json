@@ -1,0 +1,78 @@
+{
+  "_comment": [
+    "DEFAULT THRESHOLDS — NOT FITTED.",
+    "",
+    "Status: M2 (2026-09-21). Calibration is deferred because no labels exist",
+    "yet (SPEC.md §9, M7). These values are documented starting points chosen",
+    "to be permissive enough that the system does not reject frames on a clean",
+    "machine with no corpus. They will be replaced by threshold fitting on the",
+    "dev split once the label campaign (M7) is complete.",
+    "",
+    "DO NOT report precision, recall or F1 against these thresholds: a number",
+    "from an unlabelled corpus is not evidence (AGENTS.md §judging-honestly).",
+    "",
+    "Schema: each framing key maps to a thresholds object. The special key",
+    "'_default' is used when the shot's framing is not explicitly listed.",
+    "",
+    "Fields per framing:",
+    "  person_score_threshold: minimum detection score to count a person.",
+    "    Lower = more recalls (more false positives); higher = more precise",
+    "    (more false negatives). Starting value: 0.5 (COCO convention).",
+    "  missing_entity_abstain_on_empty: if true, emit 'unsure' rather than",
+    "    'missing_entity' when the detector finds zero people in a frame that",
+    "    declares a character. A blank image and a very-far wide shot both",
+    "    return zero detections; until we have labelled examples of each, we",
+    "    should abstain rather than reject good frames. Default: true.",
+    "  extra_person_confidence: the confidence assigned to an extra_person",
+    "    finding. Not fitted; 0.8 is a documentation placeholder.",
+    "  duplicated_character_confidence: idem for duplicated_character.",
+    "  missing_entity_confidence: idem for missing_entity."
+  ],
+  "fitted": false,
+  "fitted_at": null,
+  "label_file": null,
+  "thresholds": {
+    "_default": {
+      "person_score_threshold": 0.50,
+      "missing_entity_abstain_on_empty": true,
+      "extra_person_confidence": 0.80,
+      "duplicated_character_confidence": 0.85,
+      "missing_entity_confidence": 0.65
+    },
+    "close-up": {
+      "person_score_threshold": 0.50,
+      "missing_entity_abstain_on_empty": true,
+      "extra_person_confidence": 0.80,
+      "duplicated_character_confidence": 0.85,
+      "missing_entity_confidence": 0.60
+    },
+    "medium shot": {
+      "person_score_threshold": 0.50,
+      "missing_entity_abstain_on_empty": true,
+      "extra_person_confidence": 0.80,
+      "duplicated_character_confidence": 0.85,
+      "missing_entity_confidence": 0.65
+    },
+    "wide shot": {
+      "person_score_threshold": 0.40,
+      "missing_entity_abstain_on_empty": true,
+      "extra_person_confidence": 0.75,
+      "duplicated_character_confidence": 0.80,
+      "missing_entity_confidence": 0.60
+    },
+    "extreme wide shot": {
+      "person_score_threshold": 0.35,
+      "missing_entity_abstain_on_empty": true,
+      "extra_person_confidence": 0.70,
+      "duplicated_character_confidence": 0.75,
+      "missing_entity_confidence": 0.55
+    },
+    "aerial": {
+      "person_score_threshold": 0.35,
+      "missing_entity_abstain_on_empty": true,
+      "extra_person_confidence": 0.70,
+      "duplicated_character_confidence": 0.75,
+      "missing_entity_confidence": 0.55
+    }
+  }
+}
