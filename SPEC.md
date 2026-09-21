@@ -39,8 +39,10 @@ blind identity check has no anchor; we have an approved reference. So frame-jury
 is not "another detector": it is a *contract checker* that uses detectors as
 evidence.
 
-Second advantage: a labelled corpus that exists already — 782 rendered frames
-and 370 reference images across 74 runs, each joinable to its declaration.
+Second advantage: the corpus raw material exists already. The current run-tree
+rebuild emits 782 cases from 41 usable runs; its 73 run directories contain 370
+reference images. Every emitted frame is joinable to its declaration, but it is
+not a labelled corpus until the human campaign records ground truth.
 
 ## 2. Scope
 
@@ -83,16 +85,26 @@ adapter will speak exactly it.
 ```jsonc
 // request
 {
+  "schema_version": "2.0",
   "image_path": "…/shot-scene-001-004.png",
   "shot": {
     "shot_id": "shot-scene-001-004",
     "framing": "close-up",            // the shot's camera framing
     "declared_entities": [
-      { "entity_id": "char-vigia", "kind": "character",
+      { "entity_id": "char-vigia", "kind": "character", "display_name": "O vigia",
+        "aliases": ["guarda-noturno"], "visual_identity": "Homem grisalho…",
+        "relative_scale": "adulto alto", "approximate_dimensions": "1,85 m",
         "reference_images": ["…/reference-sheet/char-vigia.png"] },
-      { "entity_id": "obj-caderno", "kind": "object", "reference_images": [] }
+      { "entity_id": "obj-caderno", "kind": "object", "display_name": "Caderno",
+        "aliases": [], "visual_identity": "Caderno de capa preta…",
+        "relative_scale": "cabe em uma mão", "approximate_dimensions": "20 × 14 cm",
+        "reference_images": [] }
     ],
-    "staging": "O vigia inclina-se sobre o caderno…",
+    "staging": {
+      "purpose": "O vigia descobre a anotação decisiva…",
+      "must_render": ["O caderno deve estar aberto"],
+      "composition": ["O rosto e o caderno permanecem em foco"]
+    },
     "positive_prompt": "…",
     "negative_prompt": "…"
   },
@@ -104,6 +116,7 @@ adapter will speak exactly it.
 ```jsonc
 // verdict
 {
+  "schema_version": "2.0",
   "shot_id": "shot-scene-001-004",
   "verdict": "accept" | "reject" | "unsure",
   "confidence": 0.0,
@@ -133,7 +146,7 @@ Rules the verdict must obey:
 - deterministic: the same image and declaration give the same verdict, with
   pinned weights and fixed seeds.
 
-## 5. Defect taxonomy (v1)
+## 5. Defect taxonomy (v2)
 
 | defect | check | how it is decided |
 |---|---|---|
@@ -141,13 +154,24 @@ Rules the verdict must obey:
 | `extra_person` | presence | a person where none was declared |
 | `missing_entity` | presence | a declared character/object not found |
 | `wrong_identity` | identity | face embedding distance to the entity's reference above threshold |
-| `broken_anatomy` | anatomy | hands/limbs implausible (our own detector; HADM's idea, not its code) |
-| `fused_objects` | anatomy | two declared objects rendered as one body |
+| `broken_hands` | anatomy | hands or fingers have the wrong count, are fused or are malformed; this common defect may need a dedicated detector |
+| `broken_body` | anatomy | limbs, joints or poses are impossible, or a face is melted |
+| `wrong_scale` | contract | an entity has the wrong size or proportion relative to the scene, another entity or its bible declaration |
+| `fused_objects` | anatomy | two distinct objects/entities have collapsed into one connected body or lost their boundary |
 | `garbled_text` | legibility | text-like regions that are not words |
 | `empty_or_flat` | legibility | blank, near-uniform or detail-starved frame |
 
-v1 must ship `presence` and `identity` well. `anatomy` and `legibility` are
-research tracks whose baselines the benchmark measures first.
+`wrong_scale` is contract-checkable, not a matter of taste: the Production
+Bible already declares `relative_scale` and `approximate_dimensions` for an
+entity, and the case carries both for comparison. `fused_objects` is about two
+entities losing their boundary, unlike `wrong_scale`, where the entity remains
+distinct but has the wrong size. `broken_body` is malformed human anatomy,
+unlike `wrong_scale`, which compares an otherwise recognizable entity's size
+against its declared context.
+
+The first detector release must ship `presence` and `identity` well. `anatomy`,
+`wrong_scale` and `legibility` are research tracks whose baselines the benchmark
+measures first.
 
 ## 6. Architecture
 
@@ -193,24 +217,51 @@ The corpus builder reads Content Factory runs and emits one case per rendered
 frame:
 
 ```jsonc
-{ "case_id": "run-suspense-stakeout-20260919-181850/shot-scene-001-004",
-  "image_path": "…", "shot": { …the declaration… },
+{ "schema_version": "2.0",
+  "case_id": "run-suspense-stakeout-20260919-181850/shot-scene-001-004",
+  "image_path": "…",
+  "shot": {
+    "shot_id": "shot-scene-001-004", "framing": "close-up",
+    "declared_entities": [
+      { "entity_id": "char-vigia", "kind": "character", "display_name": "O vigia",
+        "aliases": ["guarda-noturno"], "visual_identity": "Homem grisalho…",
+        "relative_scale": "adulto alto", "approximate_dimensions": "1,85 m",
+        "reference_images": ["…/reference-sheet/char-vigia.png"] }
+    ],
+    "staging": {
+      "purpose": "O vigia descobre a anotação decisiva…",
+      "must_render": ["O caderno deve estar aberto"],
+      "composition": ["O rosto e o caderno permanecem em foco"]
+    },
+    "positive_prompt": "…", "negative_prompt": "…"
+  },
   "reference_images": { "char-vigia": ["…"] },
   "provenance": { "run_id": "…", "model": "…", "seed": 1234 } }
 ```
 
 Joins, all present in a run: the image file name is the `shot_id`; the
-declaration is in `07-direction/outcome.json`; the world gives each entity's
-kind; `05-production-bible/reference-sheet/` gives reference images; the
-`*.visual.json` sidecar gives prompts, model and seed.
+declaration is in `07-direction/outcome.json`; `staging.purpose`,
+`staging.must_render` and `staging.composition` are respectively the matched
+shot's `purpose`, `must_render_constraints` and `composition_constraints`; the
+world gives each entity's kind, display name and aliases;
+`05-production-bible/reference-sheet/` gives reference images; optional
+`05-production-bible/bible.json` supplies `visual_identity`, `relative_scale`
+and `approximate_dimensions` by `entity_id`; and the `*.visual.json` sidecar
+gives prompts, model and seed. A **usable run** is a run from which at least one
+case is emitted, whatever other stages that run happens to hold.
 
 **Labels.** A minimal labelling tool (a local HTML page or a terminal loop)
 shows the frame beside its declaration and records one line per case:
 
 ```jsonc
-{ "case_id": "…", "defects": ["duplicated_character"], "notes": "",
+{ "schema_version": "2.0", "taxonomy_version": "2.0",
+  "case_id": "…", "defects": ["duplicated_character"], "notes": "",
   "labeller": "rudson", "at": "2026-09-20T…" }
 ```
+
+Schema-1.0 label lines are historical records and remain valid as written. In
+particular, legacy `broken_anatomy` means “body or hands, unspecified”; scoring
+must not silently reinterpret it as either `broken_body` or `broken_hands`.
 
 Targets: **300 labelled cases** for v1, stratified by run, framing and by
 whether a character is declared; at least 40 positives for each defect v1 ships.
