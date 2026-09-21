@@ -28,25 +28,56 @@ wrong, it says so in the PR and stops — it does not route around it
 
 ## Model policy
 
-The rule is **cheapest model that can do the task, escalate on evidence, never
-escalate on a hunch.** This mirrors the factory's own rule that expensive work
-follows cheaper gates.
+**The medium tier is the default for all implementation.** Not the tier that
+feels safe for a given task — the medium tier, every time, with the scope made
+small enough that it is sufficient.
 
-| work | model | why |
-|---|---|---|
-| mechanical implementation from a written brief: backends, adapters, plumbing, tests, README | `gemini-3.8-flash-medium` | the brief already contains the decisions; this is typing, and it is the bulk of the milestones |
-| implementation needing judgement: the presence check's logic against the declaration, the identity abstain rule, the harness protocol | `claude-sonnet-4-6` | wrong judgement here is expensive to find later, and it is a small share of the lines |
-| architecture, licence calls, defect taxonomy, reviewing PRs, deciding what "done" means | Claude Opus 5, in Claude Code | these are the decisions the whole repository is built on |
-| anything after the Claude budget is exhausted | `codex` | the fallback, see below |
+| work | model |
+|---|---|
+| all implementation: contracts, backends, checks, harness, tests, README | `gemini-3.8-flash-medium`, or `gpt-oss-120b-medium` |
+| architecture, licence calls, defect taxonomy, writing the briefs, reviewing PRs | Claude Opus 5, in Claude Code |
+| anything after the Claude budget is exhausted | `codex`, also at a medium model |
 
-Escalate a task one tier when, and only when: the cheap model produced a PR that
-failed review twice on the same point, or the task turned out to need a decision
-the brief did not contain. Record the escalation in the PR. Going straight to
-the expensive model "to be safe" is the failure this table exists to prevent.
+### Scope carries what the model does not
 
-`gpt-oss-120b-medium` is the alternate for the cheap tier if Gemini Flash proves
-weak on Python; `gemini-3.1-pro-high` is available but is not the default for
-anything, because the medium tier has not yet been shown to fail.
+This is the part that makes the medium tier work, and it is the orchestrator's
+job, not the implementer's. A medium model rarely fails at writing Python. It
+fails at **deciding** — at choosing between two reasonable designs, at guessing
+what a half-specified rule meant, at noticing that a requirement contradicts
+another one three sections away.
+
+So a brief for a medium model leaves nothing to decide:
+
+- name the files to create, and what belongs in each;
+- name the functions and their signatures, not just the behaviour;
+- say what each test asserts, and what fixture it builds;
+- say what is explicitly **out** of this brief, because an under-occupied model
+  invents scope;
+- resolve, in the brief, every question the specification leaves open — if the
+  orchestrator cannot answer one, the brief is not ready to send;
+- keep it to one coherent piece of work. A milestone that needs more than that
+  is **split into several briefs**, in sequence.
+
+Splitting is always the first response to a task that feels too big for the
+tier. Reaching for a larger model is the last.
+
+### Escalation
+
+Escalate one tier only when a PR has failed review **twice on the same point**,
+and record it in the PR. Two failures on the same point means the brief was
+ambiguous, so rewriting the brief is tried before the model is changed —
+usually it is the cheaper and the more durable fix.
+
+Going straight to the expensive model "to be safe" is the exact failure this
+section exists to prevent. `gemini-3.1-pro-high` and the thinking Claude models
+are available and are the default for nothing.
+
+### Recorded deviation
+
+M2 (presence) was implemented on `claude-sonnet-4-6` before this rule was
+tightened, on the reasoning that the presence logic needed judgement. Under the
+rule above that was the wrong call: the judgement should have gone into the
+brief instead. M3 onwards runs on the medium tier.
 
 ## Token exhaustion, which is expected and planned for
 
