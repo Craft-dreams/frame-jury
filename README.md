@@ -21,7 +21,11 @@ that abstains.
 
 Milestone M1 provides the corpus builder, strict case and label schemas, a local
 keyboard-first labelling page, and deterministic run-level dev/test splits.
-Detector work starts in M2.
+
+Milestone M2 provides the public JSON contract, the presence check
+(`duplicated_character`, `extra_person`, `missing_entity`), two detector
+backends (torchvision FasterRCNN and RT-DETR), the jury router, and calibration
+thresholds as data.  Detector work and the full identity check (M3) come next.
 
 ## Build and label the corpus
 
@@ -100,6 +104,90 @@ does the frame show what was asked    -> a vision model, last and dearest
 
 Cheap and deterministic checks run first and gate the expensive ones. Thresholds
 are calibrated data per camera framing, not numbers typed into the code.
+
+## Judging a frame (M2 — presence check)
+
+Install the required packages (CPU only; no GPU required):
+
+```powershell
+pip install torch torchvision Pillow --index-url https://download.pytorch.org/whl/cpu
+```
+
+Then call `frame_jury.jury.judge` with a parsed request:
+
+```python
+import json
+from frame_jury.contract import JuryRequest
+from frame_jury.jury import judge
+
+request = JuryRequest.from_json(json.dumps({
+    "schema_version": "2.0",
+    "image_path": "/path/to/shot-scene-001-004.png",
+    "shot": {
+        "shot_id": "shot-scene-001-004",
+        "framing": "close-up",
+        "declared_entities": [
+            {
+                "entity_id": "char-vigia",
+                "kind": "character",
+                "display_name": "O vigia",
+                "aliases": ["guarda-noturno"],
+                "reference_images": []
+            }
+        ],
+        "staging": {
+            "purpose": "O vigia descobre a anotação decisiva.",
+            "must_render": [],
+            "composition": []
+        },
+        "positive_prompt": "…",
+        "negative_prompt": "…"
+    },
+    "checks": ["presence"],
+    "budget": "cheap"
+}))
+
+verdict = judge(request)   # downloads weights on first run (~10 MB), then local
+print(verdict.to_json())
+```
+
+The verdict JSON matches the schema in `SPEC.md §4` exactly. The `verdict`
+field is `"accept"`, `"reject"` or `"unsure"`. Every finding in `findings`
+carries the evidence numbers that produced it (counts, boxes) and a
+`prompt_hint` — a suggestion for the operator, never an automatic edit.
+
+On a first run the detector downloads ~10 MB of weights (BSD-3-Clause for
+torchvision). Weights are cached in the torch hub directory and verified by
+sha256 on subsequent runs. No GPU and no network access are needed after the
+first download.
+
+To use the RT-DETR backend instead:
+
+```python
+from frame_jury.backends.detector_rtdetr import RTDetrDetector
+verdict = judge(request, detector=RTDetrDetector())
+```
+
+## Calibration
+
+Thresholds are stored in `frame_jury/calibration/defaults.json`, keyed by
+camera framing (e.g. `"close-up"`, `"wide shot"`). They are **not fitted**
+in M2 — fitting requires the label campaign (M7). The `"fitted": false` flag
+in the JSON is the authoritative marker.
+
+Do not claim precision, recall or F1 numbers against these defaults; they are
+documentation values, not evidence (`AGENTS.md §judging-honestly`).
+
+To override thresholds for a specific run (e.g. a custom calibration file):
+
+```python
+from frame_jury.calibration.thresholds import CalibrationFile
+cal = CalibrationFile.load("/path/to/my-thresholds.json")
+verdict = judge(request, calibration=cal)
+```
+
+The JSON schema for a calibration file is the same as `defaults.json`.
+
 
 ## Licence
 
