@@ -2,7 +2,7 @@
   "_comment": [
     "DEFAULT THRESHOLDS — NOT FITTED.",
     "",
-    "Status: M2 (2026-09-21). Calibration is deferred because no labels exist",
+    "Status: M3 (2026-09-21). Calibration is deferred because no labels exist",
     "yet (SPEC.md §9, M7). These values are documented starting points chosen",
     "to be permissive enough that the system does not reject frames on a clean",
     "machine with no corpus. They will be replaced by threshold fitting on the",
@@ -14,7 +14,7 @@
     "Schema: each framing key maps to a thresholds object. The special key",
     "'_default' is used when the shot's framing is not explicitly listed.",
     "",
-    "Fields per framing:",
+    "Fields per framing (presence):",
     "  person_score_threshold: minimum detection score to count a person.",
     "    Lower = more recalls (more false positives); higher = more precise",
     "    (more false negatives). Starting value: 0.5 (COCO convention).",
@@ -26,7 +26,25 @@
     "  extra_person_confidence: the confidence assigned to an extra_person",
     "    finding. Not fitted; 0.8 is a documentation placeholder.",
     "  duplicated_character_confidence: idem for duplicated_character.",
-    "  missing_entity_confidence: idem for missing_entity."
+    "  missing_entity_confidence: idem for missing_entity.",
+    "",
+    "Fields per framing (identity, M3):",
+    "  identity_similarity_threshold: minimum cosine similarity between frame face",
+    "    and reference face to accept identity. Below threshold -> wrong_identity.",
+    "  identity_ambiguous_band: half-width of the ambiguous zone around threshold",
+    "    ([threshold - band, threshold + band]). When similarity falls inside this",
+    "    zone, the judge abstains (unsure) rather than guessing.",
+    "  identity_confidence: confidence assigned to a wrong_identity finding.",
+    "",
+    "Why wide-shot thresholds are more permissive than close-up:",
+    "  A close-up and a wide shot must not share a threshold. In a close-up, the face",
+    "  occupies hundreds of pixels with high facial detail and minimal distortion,",
+    "  allowing a stricter similarity threshold (0.60) to prevent impostor faces.",
+    "  In a wide shot, the character's face occupies significantly fewer pixels",
+    "  (often under 30-50 px), subject to compression artifacts and lower resolution,",
+    "  which systematically lowers cosine similarity even for the correct character.",
+    "  The wide-shot threshold is therefore more permissive (0.45) to prevent false",
+    "  rejections of the true character."
   ],
   "fitted": false,
   "fitted_at": null,
@@ -37,42 +55,60 @@
       "missing_entity_abstain_on_empty": true,
       "extra_person_confidence": 0.80,
       "duplicated_character_confidence": 0.85,
-      "missing_entity_confidence": 0.65
+      "missing_entity_confidence": 0.65,
+      "identity_similarity_threshold": 0.55,
+      "identity_ambiguous_band": 0.05,
+      "identity_confidence": 0.85
     },
     "close-up": {
       "person_score_threshold": 0.50,
       "missing_entity_abstain_on_empty": true,
       "extra_person_confidence": 0.80,
       "duplicated_character_confidence": 0.85,
-      "missing_entity_confidence": 0.60
+      "missing_entity_confidence": 0.60,
+      "identity_similarity_threshold": 0.60,
+      "identity_ambiguous_band": 0.05,
+      "identity_confidence": 0.85
     },
     "medium shot": {
       "person_score_threshold": 0.50,
       "missing_entity_abstain_on_empty": true,
       "extra_person_confidence": 0.80,
       "duplicated_character_confidence": 0.85,
-      "missing_entity_confidence": 0.65
+      "missing_entity_confidence": 0.65,
+      "identity_similarity_threshold": 0.55,
+      "identity_ambiguous_band": 0.05,
+      "identity_confidence": 0.85
     },
     "wide shot": {
       "person_score_threshold": 0.40,
       "missing_entity_abstain_on_empty": true,
       "extra_person_confidence": 0.75,
       "duplicated_character_confidence": 0.80,
-      "missing_entity_confidence": 0.60
+      "missing_entity_confidence": 0.60,
+      "identity_similarity_threshold": 0.45,
+      "identity_ambiguous_band": 0.05,
+      "identity_confidence": 0.80
     },
     "extreme wide shot": {
       "person_score_threshold": 0.35,
       "missing_entity_abstain_on_empty": true,
       "extra_person_confidence": 0.70,
       "duplicated_character_confidence": 0.75,
-      "missing_entity_confidence": 0.55
+      "missing_entity_confidence": 0.55,
+      "identity_similarity_threshold": 0.40,
+      "identity_ambiguous_band": 0.05,
+      "identity_confidence": 0.75
     },
     "aerial": {
       "person_score_threshold": 0.35,
       "missing_entity_abstain_on_empty": true,
       "extra_person_confidence": 0.70,
       "duplicated_character_confidence": 0.75,
-      "missing_entity_confidence": 0.55
+      "missing_entity_confidence": 0.55,
+      "identity_similarity_threshold": 0.35,
+      "identity_ambiguous_band": 0.05,
+      "identity_confidence": 0.70
     }
   }
 }

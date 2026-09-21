@@ -52,9 +52,9 @@ from frame_jury.backends.base import Detection, DetectorBackend
 # download proceeds normally; the check runs on subsequent calls.
 _HF_MODEL_ID = "PekingU/rtdetr_r50vd"
 _WEIGHTS_FILENAME = "model.safetensors"
-# sha256 pinned 2026-09-21; update here and in THIRD_PARTY_NOTICES.md whenever
+# sha256 pinned 2026-09-21 via HuggingFace LFS OID; update here and in THIRD_PARTY_NOTICES.md whenever
 # the upstream weights change.
-_WEIGHTS_SHA256 = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+_WEIGHTS_SHA256 = "5263d5521eff3e356f6cd8a371fd5dfb891725beda5f713674f79669115cdc64"
 
 # The person label in COCO as decoded by the RT-DETR processor.
 _PERSON_LABEL = "person"
