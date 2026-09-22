@@ -129,6 +129,7 @@ class Shot:
     staging: Staging
     positive_prompt: str
     negative_prompt: str
+    other_people_allowed: bool = True
 
     @classmethod
     def from_dict(cls, d: dict[str, Any], location: str = "shot") -> "Shot":
@@ -146,6 +147,7 @@ class Shot:
             staging=Staging.from_dict(d.get("staging", {}), f"{location}.staging"),
             positive_prompt=d.get("positive_prompt", ""),
             negative_prompt=d.get("negative_prompt", ""),
+            other_people_allowed=_bool(d, "other_people_allowed", location, default=True),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -156,6 +158,7 @@ class Shot:
             "staging": self.staging.to_dict(),
             "positive_prompt": self.positive_prompt,
             "negative_prompt": self.negative_prompt,
+            "other_people_allowed": self.other_people_allowed,
         }
 
     # Convenience helpers used by the checks.
@@ -492,3 +495,11 @@ def _str(d: dict[str, Any], key: str, location: str) -> str:
     if not isinstance(v, str):
         raise ContractError(f"{location}.{key}: must be a string")
     return v
+
+
+def _bool(d: dict[str, Any], key: str, location: str, default: bool = True) -> bool:
+    v = d.get(key, default)
+    if not isinstance(v, bool):
+        raise ContractError(f"{location}.{key}: must be a bool")
+    return v
+

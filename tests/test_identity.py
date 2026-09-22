@@ -27,7 +27,7 @@ from frame_jury.backends.face_yunet_sface import YuNetSFaceBackend
 from frame_jury.calibration.thresholds import CalibrationFile, load_defaults
 from frame_jury.checks.identity import run_identity_check
 from frame_jury.contract import (
-    DEFECT_DUPLICATED_CHARACTER,
+    DEFECT_EXTRA_PERSON,
     DEFECT_WRONG_IDENTITY,
     Abstention,
     Entity,
@@ -167,6 +167,7 @@ def _make_shot(
     reference_images: tuple[str, ...] = ("ref.png",),
     entity_id: str = "char-vigia",
     display_name: str = "O vigia",
+    other_people_allowed: bool = True,
 ) -> Shot:
     return Shot(
         shot_id="shot-001",
@@ -183,6 +184,7 @@ def _make_shot(
         staging=Staging(purpose="test", must_render=(), composition=()),
         positive_prompt="portrait",
         negative_prompt="",
+        other_people_allowed=other_people_allowed,
     )
 
 
@@ -657,7 +659,7 @@ class TestJuryIdentityIntegration(unittest.TestCase):
                 return "0" * 64
 
             def detect(self, image_path, *, score_threshold=0.5):
-                # 2 people detected for 1 declared character -> duplicated_character (blocking)
+                # 2 people detected for 1 declared character with other_people_allowed=False -> extra_person (blocking)
                 return [
                     Detection(label="person", confidence=0.9, box=(0, 0, 50, 50)),
                     Detection(label="person", confidence=0.9, box=(60, 0, 100, 50)),
@@ -668,7 +670,7 @@ class TestJuryIdentityIntegration(unittest.TestCase):
             frame = _make_dummy_image(root, "frame.png")
             ref = _make_dummy_image(root, "ref.png")
 
-            shot = _make_shot(framing="close-up", reference_images=(str(ref),))
+            shot = _make_shot(framing="close-up", reference_images=(str(ref),), other_people_allowed=False)
             request = self._build_request(frame, shot, ["presence", "identity"])
             face_backend = FakeFaceBackend.with_target_similarity(0.20)
 
@@ -681,7 +683,7 @@ class TestJuryIdentityIntegration(unittest.TestCase):
         # Presence failed (blocking), so router stopped early.
         self.assertEqual(verdict.verdict, "reject")
         self.assertEqual(len(verdict.findings), 1)
-        self.assertEqual(verdict.findings[0].defect, DEFECT_DUPLICATED_CHARACTER)
+        self.assertEqual(verdict.findings[0].defect, DEFECT_EXTRA_PERSON)
         # Identity did not run:
         self.assertNotIn("identity", verdict.timings_ms)
         self.assertEqual(len(face_backend.detect_calls), 0)
