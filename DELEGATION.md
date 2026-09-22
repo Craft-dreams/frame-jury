@@ -26,6 +26,34 @@ decides the architecture. When the implementer thinks the specification is
 wrong, it says so in the PR and stops — it does not route around it
 (`AGENTS.md`).
 
+## Running `agy` from Claude Code
+
+Learned the hard way, and each point cost a failed run:
+
+```bash
+agy --dangerously-skip-permissions \
+    --add-dir "C:\Users\rudso\Projetos\<repository>" \
+    --model gemini-3.8-flash-medium \
+    --print "$(cat <brief path>)"
+```
+
+1. **`agy` is the first token.** No `cd <repo> &&` in front: that changes the
+   command shape and the permission rule `Bash(agy *)` no longer matches. The
+   repository is named with `--add-dir`.
+2. **`--dangerously-skip-permissions` is mandatory.** In headless `--print`
+   mode, `--mode accept-edits` silently denies every tool call and produces no
+   output and no files — it looks like a hang.
+3. **The brief is passed verbatim**, from a file. A correction is a new brief
+   file, not text appended to the `--print` string.
+4. **`agy` cannot run a long command to completion.** Its harness moves a
+   long-running command into a background task and kills it when the session
+   ends. It happened on both M4a runs (2026-09-22), the second time with the
+   brief saying in bold to run everything in the foreground — so it is the tool,
+   not the brief, and rewriting the brief again will not fix it. A brief
+   therefore never asks `agy` to run a benchmark or any other slow measurement.
+   The orchestrator runs it and commits the result with explicit paths. That is
+   measurement, not implementation, and the PR says who ran what.
+
 ## Model policy
 
 **The medium tier is the default for all implementation.** Not the tier that
