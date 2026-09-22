@@ -414,16 +414,20 @@ reported (2026-09-22), both open:
   | mean-pooled MobileNetV3 features (the person detector's own backbone) | 0.852 / 0.867 | 0.869 / 0.929 | 42 of 70 |
   | HSV colour histogram of the person crop | 0.524 / 0.892 | 0.739 / 0.988 | 56 of 70 |
 
-  The backbone carries no signal at all. Colour carries some — clones sit
-  higher — but two characters in similar clothes or uniforms reach 0.95–0.99.
-  Neither faces, generic features nor colour decide "the same person twice".
-  That is exactly what person re-identification models are trained for, and no
-  donor for it is catalogued yet: this measured deficiency is what licenses a
-  targeted search (`AGENTS.md`, research freeze), with the licence of both the
-  code and the **training data** of any re-id weights checked first, since the
-  standard re-id datasets are commonly research-only. The alternative is the
-  `full` budget's VLM, asked directly whether two people in the frame are the
-  same character.
+  The backbone carries no signal at all — it was trained to find people, not
+  to tell them apart. Colour carries some — clones sit higher — but two
+  characters in similar clothes or uniforms reach 0.95–0.99.
+
+  The donor already selected for this question was not tried yet:
+  `content-factory/docs/DONOR-CATALOG.md` lists **VBench** (Apache-2.0), whose
+  subject-consistency measure uses **DINOv2** features (Apache-2.0, weights
+  included) to decide whether two images show the same subject — and CLIP (MIT)
+  beside it. That is the next measurement, on these same eight clones and 70
+  clean frames, before any new search. Person re-identification models are the
+  fallback if DINOv2 fails too, with the licence of their **training data**
+  checked first (the standard re-id datasets are commonly research-only). The
+  factory's existing prompt judge, a language model, is the last and most
+  expensive option, as the catalog already orders it.
 
 - **A reference sheet can itself be defective.** Identity measures a frame's
   distance to the reference, so a cloned or deformed reference poisons every
