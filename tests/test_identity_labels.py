@@ -367,6 +367,18 @@ class IdentityServerTests(unittest.TestCase):
         self.assertIsNotNone(action_bar)
         self.assertIn("position: sticky", action_bar.group(1))
 
+    def test_frame_page_serves_open_positive_prompt_and_sticky_decision_bar(self) -> None:
+        html = self.get_text("/")
+        css = self.get_text("/style.css")
+
+        heading = "Prompt positivo (o que foi pedido)"
+        self.assertIn(heading, html)
+        positive_prompt = html.index('id="positive-prompt"')
+        self.assertNotIn("<details", html[:positive_prompt].rsplit("</details>", 1)[-1])
+        decision_bar = re.search(r"\.frame-page \.decision-panel\s*\{([^}]*)\}", css)
+        self.assertIsNotNone(decision_bar)
+        self.assertIn("position: sticky", decision_bar.group(1))
+
 
 if __name__ == "__main__":
     unittest.main()
