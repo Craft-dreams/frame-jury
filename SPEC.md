@@ -164,7 +164,7 @@ Rules the verdict must obey:
 - deterministic: the same image and declaration give the same verdict, with
   pinned weights and fixed seeds.
 
-## 5. Defect taxonomy (v2)
+## 5. Defect taxonomy (v2.1)
 
 | defect | check | how it is decided |
 |---|---|---|
@@ -173,9 +173,11 @@ Rules the verdict must obey:
 | `missing_entity` | presence | a declared character/object not found |
 | `wrong_identity` | identity | face embedding distance to the entity's reference above threshold |
 | `broken_hands` | anatomy | hands or fingers have the wrong count, are fused or are malformed; this common defect may need a dedicated detector |
-| `broken_body` | anatomy | limbs, joints or poses are impossible, or a face is melted |
+| `broken_body` | anatomy | limbs, joints or poses are impossible (the face is `broken_face` since v2.1) |
+| `broken_face` | anatomy | a face is deformed, melted, asymmetric beyond style, or has wrong or misplaced features |
 | `wrong_scale` | contract | an entity has the wrong size or proportion relative to the scene, another entity or its bible declaration |
 | `fused_objects` | anatomy | two distinct objects/entities have collapsed into one connected body or lost their boundary |
+| `wrong_interaction` | interaction | a character handles an object in a physically impossible or wrong way: the wrong grip, holding it by the wrong part, a hand passing through it, an object floating beside the hand meant to hold it |
 | `garbled_text` | legibility | text-like regions that are not words |
 | `empty_or_flat` | legibility | blank, near-uniform or detail-starved frame |
 
@@ -223,6 +225,27 @@ Until the factory's shot declaration carries a structured "nobody else here"
 fact, every factory case has `other_people_allowed: true`, and `extra_person`
 will not fire on the corpus. That is honest: the fact does not exist upstream
 yet, and inventing it from prompt prose is exactly what this rule forbids.
+
+### What v2.1 added, and why
+
+Both came from the operator labelling the first 67 frames and finding nowhere
+to put what they saw.
+
+- **`broken_face`**, split out of `broken_body`. A deformed face was already a
+  defect, inside `broken_body`'s definition, but no labeller could find it
+  behind a button reading "broken body". It is also a different check: faces
+  are already located by the face backend identity uses, so a face-specific
+  check has a natural home that a whole-body pose check does not.
+- **`wrong_interaction`**, new. A hand holding a sword by the blade, or a cup
+  hovering beside the fingers, is none of the v2 defects: the hand itself may be
+  anatomically fine (`broken_hands`), and the two objects keep their boundary
+  (`fused_objects`). It is judged by no cheap check; it is a research track and
+  a candidate for the `full` budget's VLM.
+
+A taxonomy-2.0 `broken_body` label means "body or face, unspecified", exactly as
+legacy `broken_anatomy` means "body or hands": it is excluded from scoring
+`broken_face`, and scoring must not reinterpret it. (None exists at the time of
+the split.)
 
 The first detector release must ship `presence` and `identity` well. `anatomy`,
 `wrong_scale` and `legibility` are research tracks whose baselines the benchmark
@@ -314,6 +337,10 @@ shows the frame beside its declaration and records one line per case:
   "labeller": "rudson", "at": "2026-09-20T…" }
 ```
 
+New labels carry `"taxonomy_version": "2.1"`. The labelling page shows each
+defect with a one-line description in Portuguese, the operator's language,
+because a bare slug hid `broken_face` for 67 frames.
+
 Schema-1.0 label lines are historical records and remain valid as written. In
 particular, legacy `broken_anatomy` means “body or hands, unspecified”; scoring
 must not silently reinterpret it as either `broken_body` or `broken_hands`.
@@ -322,6 +349,38 @@ Targets: **300 labelled cases** for v1, stratified by run, framing and by
 whether a character is declared; at least 40 positives for each defect v1 ships.
 A case nobody is sure about is labelled `uncertain` and excluded from scoring,
 never guessed.
+
+**Identity labels are a separate pass.** A frame-level label does not certify
+identity: the operator labelled the first 67 frames without comparing faces to
+the references in detail, so a frame labelled `clean` says nothing about
+whether each character is the right person. Fitting identity's threshold on
+those labels would fit it to a negative nobody checked.
+
+So identity is labelled per **(case, declared character)**, in its own
+append-only file, `benchmarks/labels/identity.jsonl` (gitignored, like the
+frame labels):
+
+```jsonc
+{ "schema_version": "1.0", "case_id": "…", "entity_id": "char-vigia",
+  "decision": "same" | "different" | "not_visible" | "unsure",
+  "faces": [0],                        // indices into face_boxes the labeller picked
+  "face_boxes": [[x0,y0,x1,y1], …],     // every face the backend found in the frame
+  "labeller": "rudson", "at": "…" }
+```
+
+The page shows the character's reference face, cropped and enlarged, beside
+every face found in the frame, also cropped, and asks one thing: which of these
+faces is this character? Picking faces and confirming means `same`; marking the
+character present but looking different means `different`; `not_visible` when
+their face is not in the frame; `unsure` otherwise. Picking **two** faces as the
+same character is how a duplicate is recorded — the ground truth identity-based
+`duplicated_character` will need.
+
+Scoring `wrong_identity` uses **only** identity records. A case is positive when
+any of its characters is `different`, negative when every character with a
+reference is `same`, and excluded otherwise — including every case with no
+identity record at all. A frame-level label never counts as an identity
+negative.
 
 Splits: `dev` (fit thresholds) and `test` (never used for fitting), split by
 **run**, so frames of the same film cannot leak between them.
