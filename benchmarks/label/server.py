@@ -6,14 +6,23 @@ import argparse
 import json
 import mimetypes
 import sys
+import threading
 import webbrowser
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, quote, urlparse
 
+from frame_jury.backends.base import FaceBackend
+
+from .faces import crop, face_boxes
+from .identity import (
+    IDENTITY_SCHEMA_VERSION,
+    IdentityLabelError,
+    IdentityStore,
+)
 from .schema import (
     DEFECTS,
     DEFECT_DESCRIPTIONS_PT,
@@ -39,7 +48,29 @@ def _public_case(case: dict[str, Any]) -> dict[str, Any]:
     return public
 
 
-def make_handler(store: LabelStore, labeller: str) -> type[BaseHTTPRequestHandler]:
+def make_handler(
+    store: LabelStore,
+    labeller: str,
+    *,
+    identity_store: IdentityStore | None = None,
+    face_backend_factory: Callable[[], FaceBackend] | None = None,
+) -> type[BaseHTTPRequestHandler]:
+    resolved_face_backend: FaceBackend | None = None
+    backend_lock = threading.Lock()
+
+    def get_face_backend() -> FaceBackend:
+        nonlocal resolved_face_backend
+        if resolved_face_backend is None:
+            with backend_lock:
+                if resolved_face_backend is None:
+                    if face_backend_factory is None:
+                        from frame_jury.jury import _resolve_face_backend
+
+                        resolved_face_backend = _resolve_face_backend(None)
+                    else:
+                        resolved_face_backend = face_backend_factory()
+        return resolved_face_backend
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "frame-jury-label/2.0"
 
@@ -86,6 +117,29 @@ def make_handler(store: LabelStore, labeller: str) -> type[BaseHTTPRequestHandle
                 except (KeyError, IndexError, ValueError):
                     self.send_error(HTTPStatus.NOT_FOUND)
                     return
+            elif kind in {"frame_face", "reference_face"}:
+                try:
+                    index = int(query.get("index", [""])[0])
+                    if kind == "frame_face":
+                        path = Path(case["image_path"])
+                    else:
+                        entity_id = query.get("entity_id", [""])[0]
+                        reference_index = int(query.get("ref", [""])[0])
+                        path = Path(case["reference_images"][entity_id][reference_index])
+                    boxes = face_boxes(str(path), get_face_backend())
+                    if index < 0:
+                        raise IndexError
+                    body = crop(str(path), boxes[index])
+                except (KeyError, IndexError, ValueError, OSError):
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+                return
             else:
                 self.send_error(HTTPStatus.BAD_REQUEST)
                 return
@@ -125,13 +179,72 @@ def make_handler(store: LabelStore, labeller: str) -> type[BaseHTTPRequestHandle
                         "legacy_broken_anatomy": store.legacy_broken_anatomy_count,
                     },
                 )
+            elif parsed.path == "/api/identity/next":
+                if identity_store is None:
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                pair = identity_store.next_pair()
+                response: dict[str, Any] = {
+                    "case": None,
+                    "entity_id": None,
+                    "entity": None,
+                    "frame_faces": [],
+                    "reference_faces": [],
+                    "labelled": identity_store.labelled_count,
+                    "total": identity_store.total_count,
+                    "labeller": labeller,
+                }
+                if pair is not None:
+                    case, entity_id = pair
+                    public_case = _public_case(case)
+                    entity = next(
+                        item
+                        for item in public_case["shot"]["declared_entities"]
+                        if item["entity_id"] == entity_id
+                    )
+                    backend = get_face_backend()
+                    frame = str(case["image_path"])
+                    reference = str(case["reference_images"][entity_id][0])
+                    case_query = quote(case["case_id"], safe="")
+                    entity_query = quote(entity_id, safe="")
+                    response.update(
+                        {
+                            "case": public_case,
+                            "entity_id": entity_id,
+                            "entity": entity,
+                            "frame_faces": [
+                                {
+                                    "index": index,
+                                    "box": box,
+                                    "url": (
+                                        f"/asset?case_id={case_query}&kind=frame_face"
+                                        f"&index={index}"
+                                    ),
+                                }
+                                for index, box in enumerate(face_boxes(frame, backend))
+                            ],
+                            "reference_faces": [
+                                {
+                                    "index": index,
+                                    "box": box,
+                                    "url": (
+                                        f"/asset?case_id={case_query}&kind=reference_face"
+                                        f"&entity_id={entity_query}&ref=0&index={index}"
+                                    ),
+                                }
+                                for index, box in enumerate(face_boxes(reference, backend))
+                            ],
+                        }
+                    )
+                self._json(HTTPStatus.OK, response)
             elif parsed.path == "/asset":
                 self._asset(parse_qs(parsed.query))
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
-            if urlparse(self.path).path != "/api/labels":
+            path = urlparse(self.path).path
+            if path not in {"/api/labels", "/api/identity/labels"}:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
             try:
@@ -141,17 +254,43 @@ def make_handler(store: LabelStore, labeller: str) -> type[BaseHTTPRequestHandle
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ValueError("request must be an object")
-                label = {
-                    "schema_version": LABEL_SCHEMA_VERSION,
-                    "taxonomy_version": TAXONOMY_VERSION,
-                    "case_id": payload.get("case_id"),
-                    "defects": payload.get("defects"),
-                    "notes": payload.get("notes", ""),
-                    "labeller": labeller,
-                    "at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                }
-                store.append(label)
-            except (json.JSONDecodeError, ValueError, LabelValidationError) as exc:
+                now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                if path == "/api/labels":
+                    label = {
+                        "schema_version": LABEL_SCHEMA_VERSION,
+                        "taxonomy_version": TAXONOMY_VERSION,
+                        "case_id": payload.get("case_id"),
+                        "defects": payload.get("defects"),
+                        "notes": payload.get("notes", ""),
+                        "labeller": labeller,
+                        "at": now,
+                    }
+                    store.append(label)
+                else:
+                    if identity_store is None:
+                        self.send_error(HTTPStatus.NOT_FOUND)
+                        return
+                    case_id = payload.get("case_id")
+                    case = identity_store.case(case_id) if isinstance(case_id, str) else None
+                    if case is None:
+                        raise IdentityLabelError(f"case_id is unknown: {case_id!r}")
+                    record = {
+                        "schema_version": IDENTITY_SCHEMA_VERSION,
+                        "case_id": case_id,
+                        "entity_id": payload.get("entity_id"),
+                        "decision": payload.get("decision"),
+                        "faces": payload.get("faces"),
+                        "face_boxes": face_boxes(str(case["image_path"]), get_face_backend()),
+                        "labeller": labeller,
+                        "at": now,
+                    }
+                    identity_store.append(record)
+            except (
+                json.JSONDecodeError,
+                ValueError,
+                LabelValidationError,
+                IdentityLabelError,
+            ) as exc:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
             self._json(HTTPStatus.CREATED, {"ok": True})
@@ -165,6 +304,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--labels", type=Path, default=Path("benchmarks/labels/labels.jsonl")
     )
+    parser.add_argument(
+        "--identity-labels",
+        type=Path,
+        default=Path("benchmarks/labels/identity.jsonl"),
+    )
     parser.add_argument("--labeller", required=True)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
@@ -176,10 +320,18 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         store = LabelStore(args.cases, args.labels)
+        identity_store = IdentityStore(
+            args.cases,
+            args.identity_labels,
+            frame_labels_path=args.labels,
+        )
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(store, args.labeller))
+    server = ThreadingHTTPServer(
+        (args.host, args.port),
+        make_handler(store, args.labeller, identity_store=identity_store),
+    )
     url = f"http://{args.host}:{server.server_port}/"
     print(
         f"Labelling {store.total_count - store.labelled_count} remaining of "
