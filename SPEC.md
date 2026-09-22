@@ -413,21 +413,22 @@ reported (2026-09-22), both open:
   |---|---|---|---|
   | mean-pooled MobileNetV3 features (the person detector's own backbone) | 0.852 / 0.867 | 0.869 / 0.929 | 42 of 70 |
   | HSV colour histogram of the person crop | 0.524 / 0.892 | 0.739 / 0.988 | 56 of 70 |
+| DINOv2 ViT-S/14 embedding of the person crop (VBench's subject-consistency features) | 0.629 / 0.723 | 0.737 / 0.926 | 50 of 70 |
 
   The backbone carries no signal at all — it was trained to find people, not
   to tell them apart. Colour carries some — clones sit higher — but two
   characters in similar clothes or uniforms reach 0.95–0.99.
 
-  The donor already selected for this question was not tried yet:
-  `content-factory/docs/DONOR-CATALOG.md` lists **VBench** (Apache-2.0), whose
-  subject-consistency measure uses **DINOv2** features (Apache-2.0, weights
-  included) to decide whether two images show the same subject — and CLIP (MIT)
-  beside it. That is the next measurement, on these same eight clones and 70
-  clean frames, before any new search. Person re-identification models are the
-  fallback if DINOv2 fails too, with the licence of their **training data**
-  checked first (the standard re-id datasets are commonly research-only). The
-  factory's existing prompt judge, a language model, is the last and most
-  expensive option, as the catalog already orders it.
+  DINOv2, the donor the catalog selected for subject consistency (via VBench,
+  Apache-2.0), was then measured too and separates nothing: it describes what an
+  image looks like in general, so two people standing in the same light, style
+  and setting look alike to it, while a clone turned to face its twin looks
+  different. Four general-purpose signals now fail the same way. "The same
+  person twice" needs a model trained on identity itself: person
+  re-identification (clothing and body, not only the face), with the licence of
+  its **training data** checked first — the standard re-id datasets are
+  commonly research-only — or the factory's existing prompt judge, a language
+  model, asked directly, last and most expensive as the catalog orders it.
 
 - **A reference sheet can itself be defective.** Identity measures a frame's
   distance to the reference, so a cloned or deformed reference poisons every
