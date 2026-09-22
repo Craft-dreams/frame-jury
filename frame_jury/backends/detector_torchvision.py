@@ -58,7 +58,7 @@ _WEIGHTS_URL = (
     "fasterrcnn_mobilenet_v3_large_320_fpn-907ea3f9.pth"
 )
 # sha256 verified 2026-09-21 against the torchvision 0.17.0 weights registry.
-_WEIGHTS_SHA256 = "907ea3f9e48eb65ef0b5e0a3f01c5e5b6dd6b1a0f3ef2a56d8e2e4e7e2d3f9e5"
+_WEIGHTS_SHA256 = "907ea3f91ff92242bc1baea8049276a3e76bca48ce7560bd268cc029f37977b5"
 _COCO_LABEL_PERSON = 1  # COCO class id for "person" (1-indexed)
 
 # Mapping from torchvision COCO integer labels to string labels.

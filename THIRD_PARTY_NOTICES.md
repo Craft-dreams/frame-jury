@@ -12,7 +12,7 @@ be licensed commercially beside the AGPL (`COMMERCIAL-LICENSE.md`).
 
 | what | version / commit | licence | used for | weights sha256 |
 |---|---|---|---|---|
-| **torchvision** | 0.17.0 | BSD-3-Clause | FasterRCNN-MobileNetV3-Large-320-FPN — person detector (`detector_torchvision.py`); weights downloaded from `https://download.pytorch.org/models/fasterrcnn_mobilenet_v3_large_320_fpn-907ea3f9.pth` | `907ea3f9e48eb65ef0b5e0a3f01c5e5b6dd6b1a0f3ef2a56d8e2e4e7e2d3f9e5` |
+| **torchvision** | 0.17.0 | BSD-3-Clause | FasterRCNN-MobileNetV3-Large-320-FPN — person detector (`detector_torchvision.py`); weights downloaded from `https://download.pytorch.org/models/fasterrcnn_mobilenet_v3_large_320_fpn-907ea3f9.pth` | `907ea3f91ff92242bc1baea8049276a3e76bca48ce7560bd268cc029f37977b5` |
 | **RT-DETR (PekingU/rtdetr_r50vd)** | Apache-2.0 | Apache-2.0 | RT-DETR-R50vd — person detector (`detector_rtdetr.py`); weights hosted at `https://huggingface.co/PekingU/rtdetr_r50vd` | `5263d5521eff3e356f6cd8a371fd5dfb891725beda5f713674f79669115cdc64` (model.safetensors LFS OID) |
 | **OpenCV Zoo YuNet** | 2023mar | MIT | YuNet — face detector (`face_yunet_sface.py`); weights downloaded from `https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx` | `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4` |
 | **OpenCV Zoo SFace** | 2021dec | Apache-2.0 | SFace — face recognizer embedding (`face_yunet_sface.py`); weights downloaded from `https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx` | `0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79` |
