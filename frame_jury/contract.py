@@ -24,7 +24,7 @@ SCHEMA_VERSION = "2.0"
 # Taxonomy constants  (SPEC.md §5)
 # ──────────────────────────────────────────────────────────
 VALID_CHECKS: frozenset[str] = frozenset(
-    {"presence", "identity", "anatomy", "legibility"}
+    {"presence", "identity", "anatomy", "legibility", "vlm_scene"}
 )
 VALID_BUDGETS: frozenset[str] = frozenset({"cheap", "full"})
 VALID_VERDICTS: frozenset[str] = frozenset({"accept", "reject", "unsure"})

@@ -269,11 +269,13 @@ frame_jury/
   checks/
     presence.py      counting people/objects against the declaration
     identity.py      reference-vs-frame face and appearance similarity
+    vlm_scene.py     scene-level defects via local VLM yes/no scorer (budget="full")
     anatomy.py       hands/limbs plausibility
     legibility.py    text and flatness
   backends/          one adapter per model, all permissive
     detector_rtdetr.py, detector_torchvision.py
     face_yunet_sface.py
+    vlm_qwen3.py                  # local VLM scorer, optional (budget = "full")
     vlm_openai_compatible.py      # optional, only when budget = "full"
   calibration/       thresholds as data, per framing, fitted on the corpus
   evidence.py        the ledger every verdict writes
@@ -297,6 +299,21 @@ Principles, all borrowed from the factory and non-negotiable here:
 4. **No network at inference.** Weights are downloaded once, pinned by sha256,
    cached locally. The optional VLM backend is the single exception, and it is
    off by default.
+
+### Local VLM scoring (VQAScore vs verbalised generation)
+
+Under `budget="full"`, scene-level semantic defects (`duplicated_character`,
+`missing_entity`) can be evaluated by a local vision-language model using
+VQAScore (one yes/no question per defect, score = $P(\text{Yes}) / (P(\text{Yes}) + P(\text{No}))$
+at the first answer token via a single forward pass, with no autoregressive generation).
+
+Evidence measured by the orchestrator on 172 labelled frames (Qwen3-VL-8B-Instruct,
+Apache-2.0, 4-bit NF4 on an RTX 4070 Ti, 3.9 s/frame):
+- `duplicated_character`: AUC 0.94
+- `missing_entity`: AUC 0.78
+- Verbalised JSON probabilities scored AUC 0.50 (chance level) — generation/JSON
+  probabilities failed completely and must never be used.
+
 
 ## 7. Corpus and ground truth
 

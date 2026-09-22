@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "frame-jury"
+version = "0.1.0"
+description = "Judges a generated frame against the declaration that asked for it."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "AGPL-3.0-or-later" }
+dependencies = [
+    "torch>=2.2",
+    "torchvision>=0.17",
+    "Pillow>=10.0",
+    "opencv-python-headless>=4.8",
+]
+
+[project.optional-dependencies]
+vlm = [
+    "transformers>=4.45",
+    "bitsandbytes>=0.43",
+    "accelerate>=0.26",
+]
+competitors = [
+    "ultralytics>=8.0.0",
+    "insightface>=0.7.3",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["frame_jury*", "benchmarks*"]
+
+[tool.setuptools.package-data]
+frame_jury = ["calibration/*.json"]
