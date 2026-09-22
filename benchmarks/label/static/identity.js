@@ -10,10 +10,10 @@ function setMessage(message, error = false) {
 }
 
 function updateSelection() {
-  document.querySelectorAll("[data-face-index]").forEach((button) => {
-    const selected = selectedFaces.has(Number(button.dataset.faceIndex));
-    button.classList.toggle("selected", selected);
-    button.setAttribute("aria-pressed", String(selected));
+  document.querySelectorAll("[data-face-index]").forEach((marker) => {
+    const selected = selectedFaces.has(Number(marker.dataset.faceIndex));
+    marker.classList.toggle("selected", selected);
+    if (marker.matches("button")) marker.setAttribute("aria-pressed", String(selected));
   });
 }
 
@@ -34,7 +34,8 @@ function drawFaceBoxes() {
     const [x0, y0, x1, y1] = face.box;
     const box = document.createElement("div");
     box.className = "face-box";
-    box.textContent = String(index + 1);
+    box.dataset.faceIndex = String(face.index);
+    box.dataset.label = String(index + 1);
     box.style.left = `${x0 * scaleX}px`;
     box.style.top = `${y0 * scaleY}px`;
     box.style.width = `${(x1 - x0) * scaleX}px`;
@@ -42,6 +43,7 @@ function drawFaceBoxes() {
     return box;
   });
   byId("face-boxes").replaceChildren(...boxes);
+  updateSelection();
 }
 
 function renderFace(face, index) {

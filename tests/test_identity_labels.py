@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import threading
 import unittest
@@ -356,6 +357,15 @@ class IdentityServerTests(unittest.TestCase):
         )
         self.assertIn("loadNext", self.get_text("/identity.js"))
         self.assertIn('href="/identity"', self.get_text("/"))
+
+    def test_identity_face_markers_and_action_bar_styles_are_served(self) -> None:
+        css = self.get_text("/style.css")
+        face_marker = re.search(r"\.face-box\s*\{([^}]*)\}", css)
+        action_bar = re.search(r"\.identity-decision-panel\s*\{([^}]*)\}", css)
+        self.assertIsNotNone(face_marker)
+        self.assertIn("background: transparent", face_marker.group(1))
+        self.assertIsNotNone(action_bar)
+        self.assertIn("position: sticky", action_bar.group(1))
 
 
 if __name__ == "__main__":
