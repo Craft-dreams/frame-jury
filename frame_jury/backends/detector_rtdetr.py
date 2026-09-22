@@ -44,16 +44,19 @@ from frame_jury.backends.base import Detection, DetectorBackend
 #
 # Model: PekingU/rtdetr_r50vd — Apache-2.0
 # URL:   https://huggingface.co/PekingU/rtdetr_r50vd
-# SHA-256 of model.safetensors verified 2026-09-21 via HuggingFace Hub API.
+# Revision: df939e661d8c52e80608d1ec566561aabd25a4e7
+# SHA-256 of model.safetensors verified 2026-09-22 via the Hugging Face Hub
+# model API with blob metadata enabled (the value is the file's LFS OID).
 #
 # NOTE: because the transformers cache layout uses hashed subdirectories,
 # _find_weights_cache() walks the cache to find the file by name.  If the
 # file is not present (first run), the sha256 check is skipped and the
 # download proceeds normally; the check runs on subsequent calls.
 _HF_MODEL_ID = "PekingU/rtdetr_r50vd"
+_HF_REVISION = "df939e661d8c52e80608d1ec566561aabd25a4e7"
 _WEIGHTS_FILENAME = "model.safetensors"
-# sha256 pinned 2026-09-21 via HuggingFace LFS OID; update here and in THIRD_PARTY_NOTICES.md whenever
-# the upstream weights change.
+# sha256 pinned 2026-09-22 via Hugging Face LFS OID; update here and in
+# THIRD_PARTY_NOTICES.md whenever the pinned revision changes.
 _WEIGHTS_SHA256 = "5263d5521eff3e356f6cd8a371fd5dfb891725beda5f713674f79669115cdc64"
 
 # The person label in COCO as decoded by the RT-DETR processor.
@@ -145,10 +148,12 @@ class RTDetrDetector(DetectorBackend):
 
         processor = RTDetrImageProcessor.from_pretrained(
             _HF_MODEL_ID,
+            revision=_HF_REVISION,
             local_files_only=False,  # download once, then cached
         )
         model = RTDetrForObjectDetection.from_pretrained(
             _HF_MODEL_ID,
+            revision=_HF_REVISION,
             local_files_only=False,
         )
         model.eval()
@@ -186,9 +191,8 @@ class RTDetrDetector(DetectorBackend):
         model_dir = hf_cache / f"models--{model_slug}"
         if not model_dir.exists():
             return None
-        for candidate in model_dir.glob(f"snapshots/*/{_WEIGHTS_FILENAME}"):
-            return candidate  # return the first (most recent) snapshot
-        return None
+        candidate = model_dir / "snapshots" / _HF_REVISION / _WEIGHTS_FILENAME
+        return candidate if candidate.is_file() else None
 
 
 def _sha256_file(path: Path) -> str:
