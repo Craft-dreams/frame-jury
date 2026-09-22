@@ -7,37 +7,33 @@ into a production pipeline only once it clears the bar in §8.
 `AGENTS.md` holds the working rules — licensing boundaries, how the corpus is
 borrowed, what a pull request must carry. Read it before writing code.
 
-The pipeline this was written for is Content Factory, which renders the frames
-and holds the declarations; it consumes frame-jury through its own port, and
-neither project imports the other.
+An upstream pipeline renders the frames and holds the declarations; it consumes
+frame-jury through its own port, and neither project imports the other.
 
 ---
 
-## 1. Why this exists, and what makes it better than the donors
+## 1. Why this exists
 
 A generated frame can be wrong in ways nobody notices until the film is cut: the
 same character appears twice, a declared prop is missing, hands have six
-fingers, the character's face is not the face it had in the previous shot.
-Today the factory renders and hopes.
+fingers, or a character's face does not match their approved reference.
+Generators render and hope.
 
-Every public project read for this judges an image **blind**: DeepFace compares
-two faces, YOLO counts what it recognises, HADM finds broken limbs, a VLM gives
-an opinion. None of them knows what the image was *supposed* to show.
-
-The factory does. Every rendered frame in `build/runs/**/10-resolved-media/visuals/`
-is named after its shot, and the run holds, for that shot:
+frame-jury judges a frame against the declaration that asked for it. Instead of
+evaluating an image blind without knowing what was intended, it starts from the
+shot contract:
 
 - `required_visible_entity_ids` — exactly which entities must be in frame;
 - each entity's kind (character, object, environment) from the canonical world;
-- an approved reference image per entity (`05-production-bible/reference-sheet/`);
+- an approved reference image per entity (`reference_images`);
 - the staging prose, the positive and the negative prompt;
 - the shot's camera framing (a close-up and a wide shot fail differently).
 
-**That declaration is the product's advantage.** A blind detector must guess
-whether two people in a frame are a defect; we know the shot declared one. A
-blind identity check has no anchor; we have an approved reference. So frame-jury
-is not "another detector": it is a *contract checker* that uses detectors as
-evidence.
+**That declaration is the product's foundation.** An isolated detector must guess
+whether two people in a frame are a defect; frame-jury knows whether the shot
+declared one. An identity check needs an anchor; frame-jury evaluates against an
+approved reference. So frame-jury is not another detector: it is a *contract
+checker* that uses detectors as evidence.
 
 Second advantage: the corpus raw material exists already. The current run-tree
 rebuild emits 782 cases from 41 usable runs; its 73 run directories contain 370
@@ -51,7 +47,7 @@ verdict with evidence, and a benchmark harness that measures ours against the
 donors on our own corpus.
 
 **Out of scope.** Generating or repairing images; video; deciding what to do
-about a verdict (the factory's run control decides that); anything that writes
+about a verdict (the caller's pipeline or run control decides that); anything that writes
 into a run directory.
 
 ## 3. Hard licensing rules
@@ -79,7 +75,7 @@ through `transformers` (Apache-2.0) for presence and counting.
 
 ## 4. The contract
 
-One call, one frame. This JSON is the public interface, and the factory's
+One call, one frame. This JSON is the public interface, and any pipeline
 adapter will speak exactly it.
 
 ```jsonc
@@ -153,8 +149,8 @@ whether people beyond the expected count are defects.
 Rules the verdict must obey:
 
 - **every finding carries its evidence** — the numbers that produced it, not
-  only a label. A verdict nobody can audit is worthless to the factory, whose
-  rule is that a failed gate must preserve enough evidence to diagnose it;
+  only a label. A verdict nobody can audit is worthless in an automated pipeline,
+  where a failed gate must preserve enough evidence to diagnose it;
 - **`unsure` is a first-class answer, and an abstention is not a finding.**
   A defect is something wrong with the frame; an abstention is something the
   judge could not determine (e.g. no face found, ambiguous similarity, or fewer
@@ -202,10 +198,10 @@ against its declared context.
 
 Decided with the operator on 2026-09-22: **a background figure is never a
 defect, unless the shot says there is nobody else in it.** A library has
-readers and a street has pedestrians; a frame that shows them is correct. The
-factory's own image prompts already say this ("any other people the place calls
-for appear only as ordinary background figures"), so a judge that punished it
-would contradict the station that asked for it.
+readers and a street has pedestrians; a frame that shows them is correct.
+Image prompts often state this ("any other people the place calls for appear
+only as ordinary background figures"), so a judge that punished it would
+contradict the prompt that asked for it.
 
 The first reading of the labels forced it. Counting every detected person
 against the declared cast produced **31 false `duplicated_character` findings
@@ -230,9 +226,9 @@ So the rule is structured, never read from prose:
   0.25–0.49 against their reference sheets, so identity is not yet reliable
   enough to claim a duplicate.
 
-Until the factory's shot declaration carries a structured "nobody else here"
-fact, every factory case has `other_people_allowed: true`, and `extra_person`
-will not fire on the corpus. That is honest: the fact does not exist upstream
+Until upstream shot declarations carry a structured "nobody else here"
+fact, current corpus cases have `other_people_allowed: true`, and `extra_person`
+will not fire on them. That is honest: the fact does not exist upstream
 yet, and inventing it from prompt prose is exactly what this rule forbids.
 
 ### What v2.1 added, and why
@@ -285,11 +281,11 @@ benchmarks/
   run.py             the harness; writes a leaderboard
 ```
 
-Principles, all borrowed from the factory and non-negotiable here:
+Core architectural principles:
 
 1. **Cheap gates first.** Counting runs on CPU in ~100 ms; a VLM call costs money
    and seconds. The router runs deterministic checks first and only escalates
-   what they cannot settle, which is also how the factory orders its own work.
+   what they cannot settle.
 2. **Backends are replaceable.** A check states what it needs; a backend
    provides it. Swapping RT-DETR for something better must touch one file.
 3. **Thresholds are data, not code.** They are fitted per framing on the corpus
@@ -300,7 +296,7 @@ Principles, all borrowed from the factory and non-negotiable here:
 
 ## 7. Corpus and ground truth
 
-The corpus builder reads Content Factory runs and emits one case per rendered
+The corpus builder reads external generator runs and emits one case per rendered
 frame:
 
 ```jsonc
@@ -343,7 +339,7 @@ shows the frame beside its declaration and records one line per case:
 ```jsonc
 { "schema_version": "2.0", "taxonomy_version": "2.0",
   "case_id": "…", "defects": ["duplicated_character"], "notes": "",
-  "labeller": "rudson", "at": "2026-09-20T…" }
+  "labeller": "your-name", "at": "2026-09-20T…" }
 ```
 
 New labels carry `"taxonomy_version": "2.1"`. The labelling page shows each
@@ -374,7 +370,7 @@ frame labels):
   "decision": "same" | "different" | "not_visible" | "unsure",
   "faces": [0],                        // indices into face_boxes the labeller picked
   "face_boxes": [[x0,y0,x1,y1], …],     // every face the backend found in the frame
-  "labeller": "rudson", "at": "…" }
+  "labeller": "your-name", "at": "…" }
 ```
 
 The page shows the character's reference face, cropped and enlarged, beside
@@ -393,7 +389,7 @@ reported (2026-09-22), both open:
   are correct, not a duplicate, and the labeller picks all of them as `same`.
   Nothing structured says an entity is a group: only its plural name, which is
   prose. Until the declaration carries that fact (an entity-level field, set
-  upstream by the factory), duplicate scoring cannot tell a group from a clone
+  upstream by the generator pipeline), duplicate scoring cannot tell a group from a clone
   and must not score entities it cannot classify.
 - **Face similarity alone does not separate clones.** On six clone frames the
   operator reported, the most similar pair of faces in the frame scored
@@ -418,7 +414,7 @@ reported (2026-09-22), both open:
   shot of that character, and no frame-level check can see it. Judging the
   reference sheets themselves — one declared character, exactly one person —
   is a natural use of the same presence and identity machinery, and belongs to
-  the factory's Production Bible stage as much as to this repository.
+  the upstream reference generation stage as much as to this repository.
 
 Scoring `wrong_identity` uses **only** identity records. A case is positive when
 any of its characters is `different`, negative when every character with a
@@ -449,7 +445,7 @@ Rules: same cases, same split, pinned versions recorded in the report, three
 runs for timing, median reported. The leaderboard is committed on every change,
 so a regression is visible in a diff.
 
-**The bar to plug it into the factory:** on the held-out split, for
+**The bar for production deployment:** on the held-out split, for
 `duplicated_character` and `wrong_identity`, recall ≥ 0.90 with precision ≥ 0.95
 at `budget=cheap`, under 400 ms per frame on CPU. Precision is the strict one on
 purpose: a judge that rejects good frames burns GPU hours and trust.
@@ -480,7 +476,7 @@ finished without labels stops at that seam, says so in its PR, and moves on.
 - **M5 — anatomy and legibility research.** Only after M4 shows where the
   remaining errors are.
 - **M6 — packaging.** `frame_jury` as a package, contract stable, licence test,
-  `THIRD_PARTY_NOTICES.md`, and an example of the factory adapter.
+  `THIRD_PARTY_NOTICES.md`, and an example pipeline adapter.
 - **M7 — mobile labelling, an offline-first PWA.** The labels are blocked on the
   operator having no desk time, so labelling has to fit a commute. Before
   leaving, the phone pulls a bundle — downscaled WebP frames, reference
@@ -498,22 +494,21 @@ Quality bar for every milestone: tests that fail without the feature, no network
 in tests, CPU-only path always available, and a README section a person can
 follow from a clean machine.
 
-## 10. How the factory will use it
+## 10. Example integration: pipeline usage
 
-The factory keeps its own port (`VisualAssuranceGate`) and its own contract.
-frame-jury is a provider behind it, exactly like ComfyUI is behind the image
-port. The run-control design already says where the verdict goes: it is the
-visual judge stage of `docs/ARTIFACT-REUSE.md` — after each image, one
-regeneration with an adjusted prompt for a frame it rejects, then
-`awaiting-review` for the human eye.
+An integrating pipeline (such as Content Factory) keeps its own port
+(`VisualAssuranceGate` or similar) and its own contract. frame-jury is a provider
+behind it, evaluating frames against shot declarations. A typical run-control loop
+uses the verdict to trigger one regeneration with an adjusted prompt for a rejected
+frame, then hands off unresolved issues for human review.
 
-Nothing in frame-jury may import Content Factory, and nothing in Content Factory
-may import a frame-jury internal: the JSON contract in §4 is the whole surface.
+Nothing in frame-jury may import an upstream pipeline, and nothing upstream may
+import a frame-jury internal: the JSON contract in §4 is the whole surface.
 
 ## 11. Working agreement for the delegation
 
-- The agent works in the `frame-jury` repository only, never in the factory.
-- The factory's runs are **read-only input**: the corpus builder must open them
+- The agent works in the `frame-jury` repository only, never in external projects.
+- External generator runs are **read-only input**: the corpus builder must open them
   read-only and copy nothing into the repository. No image is committed.
 - Every claim of quality comes with the leaderboard row that supports it.
 - When a donor's approach is reproduced, the paper or repository is cited in the

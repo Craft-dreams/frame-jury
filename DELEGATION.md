@@ -32,7 +32,7 @@ Learned the hard way, and each point cost a failed run:
 
 ```bash
 agy --dangerously-skip-permissions \
-    --add-dir "C:\Users\rudso\Projetos\<repository>" \
+    --add-dir "<your-project>" \
     --model gemini-3.8-flash-medium \
     --print "$(cat <brief path>)"
 ```
@@ -62,7 +62,7 @@ on each other run at the same time, one on each tool.
 
 ```bash
 codex exec --dangerously-bypass-approvals-and-sandbox \
-    -C "C:\Users\rudso\Projetos\<worktree>" \
+    -C "<your-worktree>" \
     -c model_reasoning_effort="medium" \
     -o <last-message file> - < <brief path>
 ```
@@ -133,22 +133,6 @@ tightened, on the reasoning that the presence logic needed judgement. Under the
 rule above that was the wrong call: the judgement should have gone into the
 brief instead. M3 onwards runs on the medium tier.
 
-**D2 — the scene chain (`movement-director`, 2026-09-22).** Implemented on a
-Claude Sonnet subagent rather than on `agy` at the medium tier. The same mistake
-as M2, made again after the rule existed, and it deserves naming: the
-orchestrator reached for a Claude subagent because that was the tool already in
-hand, not because the work needed the tier.
-
-Two things are worth keeping from it. The brief did carry the judgement — the
-projection shape, the `sets_state` decision and the refusal to infer state from
-verbs were all resolved before sending — so the deviation was in the *model*,
-not in the method. And the implementation was verified adversarially afterwards
-rather than trusted, which is what caught that `chain_invariant_mismatch` had no
-proving case among the author's own tests.
-
-`movement-director` has no `DELEGATION.md` of its own; its `SPEC.md` §9 points
-here, so its deviations are recorded here.
-
 ## Token exhaustion, which is expected and planned for
 
 When the Claude budget runs out mid-milestone, work continues on `codex` with
@@ -173,16 +157,16 @@ Agreed with the operator on 2026-09-21. This is not production code and the
 priority is finishing the component, so autonomy is wide and traceability is
 what is preserved instead:
 
-- **Free inside `Projetos\frame-jury`**: create, edit and delete files, run
+- **Free inside `<your-project>`**: create, edit and delete files, run
   tests, install permissive dependencies, commit, push, open PRs, and **merge
   its own PR into `main` once its tests pass**.
 - **Every change still goes through a PR.** Never commit to `main` directly. The
   PR is the whole audit trail — it must state what was built, what it was tested
   against, and what it could not finish. A merged PR with an empty description
   defeats the only control we kept.
-- **`content-factory` is read-only, always.** Runs under `build/runs/**` are
-  opened for reading and nothing else. No image, audio file or run artefact is
-  ever copied into this repository (`AGENTS.md`).
+- **Source runs are read-only, always.** Runs under `build/runs/**` are opened
+  for reading and nothing else. No image, audio file or run artefact is ever
+  copied into this repository (`AGENTS.md`).
 - **Never relax a licence rule.** The rules in `AGENTS.md` §licensing are not
   negotiable by an implementer. Blocked by one → say so in the PR and stop.
 - **Never invent a milestone.** Build the one in the brief. A good idea found on
