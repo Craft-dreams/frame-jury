@@ -1,4 +1,4 @@
-const shortcuts = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
+const shortcuts = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "="];
 let currentCase = null;
 let selected = new Set();
 
@@ -121,17 +121,25 @@ async function submit(defects) {
 async function initialise() {
   const state = await (await fetch("/api/next", {cache: "no-store"})).json();
   const container = byId("defect-buttons");
+  const descriptions = state.descriptions || {};
   state.defects.forEach((defect, index) => {
     const button = document.createElement("button");
     button.type = "button";
     button.dataset.defect = defect;
     button.dataset.shortcut = shortcuts[index];
-    button.innerHTML = `<kbd>${shortcuts[index]}</kbd> ${defect.replaceAll("_", " ")}`;
+    const desc = descriptions[defect] || "";
+    const descHtml = desc ? `<span class="defect-desc">${desc}</span>` : "";
+    button.innerHTML = `<span class="defect-name"><kbd>${shortcuts[index]}</kbd> ${defect.replaceAll("_", " ")}</span>${descHtml}`;
     button.addEventListener("click", () => toggleDefect(defect, button));
     container.appendChild(button);
   });
   document.querySelectorAll("[data-exclusive]").forEach((button) => {
-    button.addEventListener("click", () => submit([button.dataset.exclusive]));
+    const key = button.dataset.exclusive;
+    const desc = descriptions[key] || "";
+    const kbd = key === "clean" ? "C" : "U";
+    const descHtml = desc ? `<span class="defect-desc">${desc}</span>` : "";
+    button.innerHTML = `<span class="defect-name"><kbd>${kbd}</kbd> ${key}</span>${descHtml}`;
+    button.addEventListener("click", () => submit([key]));
   });
   byId("save").addEventListener("click", () => submit([...selected]));
   await loadNext();
@@ -143,9 +151,10 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   const key = event.key.toLowerCase();
-  const defectButton = document.querySelector(`[data-shortcut="${key}"]`);
-  if (defectButton) defectButton.click();
-  else if (key === "c") submit(["clean"]);
+  if (shortcuts.includes(key)) {
+    const defectButton = document.querySelector(`[data-shortcut="${key}"]`);
+    if (defectButton) defectButton.click();
+  } else if (key === "c") submit(["clean"]);
   else if (key === "u") submit(["uncertain"]);
   else if (key === "n") byId("notes").focus();
   else if (event.key === "Enter") submit([...selected]);

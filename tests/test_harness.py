@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,7 @@ from benchmarks.competitors import (
 from benchmarks.corpus.schema import write_cases
 from benchmarks.run import (
     get_pinned_versions,
+    load_labels,
     render_leaderboard,
     run_benchmark,
 )
@@ -187,6 +189,86 @@ class HarnessTests(unittest.TestCase):
         s_extra = score(results, labels, "extra_person")
         self.assertEqual(s_extra["excluded_legacy"], 0.0)
         self.assertEqual(s_extra["fp"], 1.0)
+
+    def test_v2_0_broken_body_excluded_from_broken_face_but_scores_broken_body(self) -> None:
+        """A 2.0 label with broken_body is excluded from broken_face scoring and counted in excluded_legacy, but still scored as a positive for broken_body."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            labels_path = Path(tmpdir) / "labels.jsonl"
+            labels_path.write_text(
+                json.dumps({
+                    "schema_version": "2.0",
+                    "taxonomy_version": "2.0",
+                    "case_id": "c1",
+                    "defects": ["broken_body"],
+                    "notes": "",
+                    "labeller": "tester",
+                    "at": "2026-09-20T12:00:00Z",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            labels = load_labels(labels_path)
+
+        self.assertIn("broken_body_v2_0", labels["c1"])
+        self.assertIn("broken_body", labels["c1"])
+
+        results = {
+            "c1": CompetitorResult(
+                defects=frozenset(["broken_body", "broken_face"]),
+                abstained=frozenset(),
+            ),
+        }
+
+        # Excluded from broken_face
+        s_face = score(results, labels, "broken_face")
+        self.assertEqual(s_face["excluded_legacy"], 1.0)
+        self.assertIsNone(s_face["precision"])
+        self.assertIsNone(s_face["recall"])
+        self.assertEqual(s_face["support"], 0.0)
+
+        # Still scored as a positive for broken_body
+        s_body = score(results, labels, "broken_body")
+        self.assertEqual(s_body["excluded_legacy"], 0.0)
+        self.assertEqual(s_body["tp"], 1.0)
+        self.assertEqual(s_body["precision"], 1.0)
+        self.assertEqual(s_body["recall"], 1.0)
+        self.assertEqual(s_body["f1"], 1.0)
+        self.assertEqual(s_body["support"], 1.0)
+
+    def test_v2_1_broken_face_scores_as_positive(self) -> None:
+        """A 2.1 label with broken_face is a positive for broken_face."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            labels_path = Path(tmpdir) / "labels.jsonl"
+            labels_path.write_text(
+                json.dumps({
+                    "schema_version": "2.0",
+                    "taxonomy_version": "2.1",
+                    "case_id": "c1",
+                    "defects": ["broken_face"],
+                    "notes": "",
+                    "labeller": "tester",
+                    "at": "2026-09-20T12:00:00Z",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            labels = load_labels(labels_path)
+
+        self.assertNotIn("broken_body_v2_0", labels["c1"])
+        self.assertIn("broken_face", labels["c1"])
+
+        results = {
+            "c1": CompetitorResult(
+                defects=frozenset(["broken_face"]),
+                abstained=frozenset(),
+            ),
+        }
+
+        s_face = score(results, labels, "broken_face")
+        self.assertEqual(s_face["excluded_legacy"], 0.0)
+        self.assertEqual(s_face["tp"], 1.0)
+        self.assertEqual(s_face["precision"], 1.0)
+        self.assertEqual(s_face["recall"], 1.0)
+        self.assertEqual(s_face["f1"], 1.0)
+        self.assertEqual(s_face["support"], 1.0)
 
     def test_abstained_case_excluded_from_precision_and_recall_and_counted_in_rate(self) -> None:
         """Abstentions are neither positive nor negative; excluded from P/R and in abstain rate."""
