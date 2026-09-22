@@ -40,14 +40,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from frame_jury.backends.base import DetectorBackend, FaceBackend
+from frame_jury.backends.base import DetectorBackend, FaceBackend, VlmScorerBackend
 from frame_jury.calibration.thresholds import CalibrationFile, load_defaults
 from frame_jury.checks.identity import run_identity_check
 from frame_jury.checks.presence import run_presence_check
+from frame_jury.checks.vlm_scene import run_vlm_scene_check
 from frame_jury.contract import JuryRequest, Verdict, VerdictBuilder
 
-# ── Check order (SPEC.md §6, cheap first) ──────────────────────────────────
-_CHEAP_FIRST_ORDER = ["presence", "identity", "anatomy", "legibility"]
+# ── Check order (SPEC.md §6, cheap first, VLM last) ────────────────────────
+_CHEAP_FIRST_ORDER = ["presence", "identity", "anatomy", "legibility", "vlm_scene"]
 
 
 def judge(
@@ -55,6 +56,7 @@ def judge(
     *,
     detector: DetectorBackend | None = None,
     face_backend: FaceBackend | None = None,
+    vlm_scorer: VlmScorerBackend | None = None,
     calibration: CalibrationFile | None = None,
 ) -> Verdict:
     """Judge one frame against its declaration.
@@ -71,6 +73,9 @@ def judge(
         Face detection and embedding backend. If *None*, the YuNet+SFace backend
         is constructed on first use (lazy import so tests that mock the backend
         never load OpenCV).
+    vlm_scorer:
+        VLM scoring backend for budget="full". If *None*, the Qwen3 backend is
+        constructed on first use if available, or abstains if unavailable.
     calibration:
         Calibration thresholds.  If *None*, the shipped defaults are used.
 
@@ -89,6 +94,7 @@ def judge(
     # Resolve backends lazily so tests can avoid importing heavy dependencies.
     resolved_detector: DetectorBackend | None = None
     resolved_face_backend: FaceBackend | None = None
+    resolved_vlm_scorer: VlmScorerBackend | None = None
 
     # Run checks in cheap-first order.
     for check_name in _CHEAP_FIRST_ORDER:
@@ -141,6 +147,29 @@ def judge(
             # M5 — not yet implemented.
             pass
 
+        elif check_name == "vlm_scene":
+            # VLM scene check runs ONLY under budget="full"
+            if budget != "full":
+                continue
+            if resolved_vlm_scorer is None:
+                resolved_vlm_scorer = _resolve_vlm_scorer(vlm_scorer)
+            findings, abstentions, measurements, elapsed_ms = run_vlm_scene_check(
+                request.image_path,
+                request.shot,
+                resolved_vlm_scorer,
+                calibration=calibration,
+            )
+            builder.add_findings(findings)
+            builder.add_abstentions(abstentions)
+            builder.update_measurements(measurements)
+            builder.record_timing("vlm_scene", elapsed_ms)
+            if resolved_vlm_scorer is not None:
+                builder.record_detector(
+                    "vlm_scene",
+                    resolved_vlm_scorer.name(),
+                    resolved_vlm_scorer.weights_sha256(),
+                )
+
         # Early stop on blocking findings when budget is cheap.
         if budget == "cheap" and any(
             f.severity == "blocking" for f in builder._findings  # noqa: SLF001
@@ -177,3 +206,21 @@ def _resolve_face_backend(face_backend: FaceBackend | None) -> FaceBackend:
     from frame_jury.backends.face_yunet_sface import YuNetSFaceBackend
 
     return YuNetSFaceBackend()
+
+
+def _resolve_vlm_scorer(vlm_scorer: VlmScorerBackend | None) -> VlmScorerBackend | None:
+    """Return *vlm_scorer* if provided, otherwise attempt to construct default backend.
+
+    The default is Qwen3-VL-8B-Instruct (Apache-2.0). The import is deferred so that
+    tests and cheap-budget calls never import heavy VLM libraries.
+    If dependencies are missing, returns None so an abstention can be emitted.
+    """
+    if vlm_scorer is not None:
+        return vlm_scorer
+    try:
+        from frame_jury.backends.vlm_qwen3 import Qwen3VlmScorer
+
+        return Qwen3VlmScorer()
+    except Exception:
+        return None
+

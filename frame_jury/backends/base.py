@@ -190,3 +190,48 @@ class FaceBackend(ABC):
             0.0 means orthogonal, -1.0 means opposite, and higher means
             more alike.
         """
+
+
+class VlmScorerBackend(ABC):
+    """Abstract base for yes/no Vision-Language Model (VLM) scoring backends.
+
+    Concrete implementations live in this package: one file each, one class
+    each. Given an image and a yes/no question, the backend returns a probability
+    in [0.0, 1.0] representing P(Yes) / (P(Yes) + P(No)) at the first answer token.
+
+    SPEC.md requirements:
+    - Permissive licence: MIT, BSD or Apache-2.0.
+    - Deterministic: same image and question give the same probability.
+    - Traceable: exposes name() and revision().
+    """
+
+    @abstractmethod
+    def name(self) -> str:
+        """Human-readable name + variant, e.g. ``'qwen3-vl-8b-instruct'``."""
+
+    @abstractmethod
+    def revision(self) -> str:
+        """Pinned model revision / commit hash."""
+
+    @abstractmethod
+    def score_yes_no(self, image_path: str | Path, question: str) -> float:
+        """Score a yes/no question against an image.
+
+        Parameters
+        ----------
+        image_path:
+            Absolute path to a JPEG or PNG image. The backend opens it read-only;
+            it never modifies the file.
+        question:
+            The yes/no question prompt to evaluate against the image.
+
+        Returns
+        -------
+        float
+            Probability P(Yes) / (P(Yes) + P(No)) at the first answer token, in [0.0, 1.0].
+        """
+
+    def weights_sha256(self) -> str:
+        """Revision or weights sha256 for traceability in verdict detectors."""
+        return self.revision()
+

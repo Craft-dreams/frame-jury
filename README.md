@@ -174,6 +174,27 @@ from frame_jury.backends.face_yunet_sface import YuNetSFaceBackend
 verdict = judge(request, face_backend=YuNetSFaceBackend())
 ```
 
+### Local VLM scoring (budget="full")
+
+For scene-level semantic defects (`duplicated_character`, `missing_entity`), install the optional `vlm` dependency group:
+
+```powershell
+pip install .[vlm]
+```
+
+Then request `budget="full"` (or include `"vlm_scene"` in `checks`):
+
+```python
+request = JuryRequest.from_json(json.dumps({
+    ...
+    "checks": ["presence", "identity", "vlm_scene"],
+    "budget": "full"
+}))
+verdict = judge(request)
+```
+
+The VLM backend (`Qwen3VlmScorer`, Qwen3-VL-8B-Instruct, Apache-2.0) uses 4-bit NF4 quantization and evaluates yes/no questions via VQAScore (one forward pass at the first answer token, no generation). When the backend is unavailable, it records a first-class `abstention` (`verdict="unsure"`) rather than silently passing.
+
 ## Calibration
 
 Thresholds are stored in `frame_jury/calibration/defaults.json`, keyed by

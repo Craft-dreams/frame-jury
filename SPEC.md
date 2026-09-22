@@ -92,6 +92,7 @@ adapter will speak exactly it.
       { "entity_id": "char-vigia", "kind": "character", "display_name": "O vigia",
         "aliases": ["guarda-noturno"], "visual_identity": "Homem grisalho…",
         "relative_scale": "adulto alto", "approximate_dimensions": "1,85 m",
+        "is_collective": false,       // optional, default false: true if entity stands for a group
         "reference_images": ["…/reference-sheet/char-vigia.png"] },
       { "entity_id": "obj-caderno", "kind": "object", "display_name": "Caderno",
         "aliases": [], "visual_identity": "Caderno de capa preta…",
@@ -118,6 +119,10 @@ require two people, while a non-person entity such as an octopus can require
 zero, without inventing entity ids and corrupting identity. When omitted, the
 derived character count remains unchanged; `other_people_allowed` still decides
 whether people beyond the expected count are defects.
+
+`entity.is_collective` optionally states whether a character entity represents a
+group of multiple people (default `false`). When `true`, clone checking treats
+the entity as collective rather than an individual.
 
 ```jsonc
 // verdict
@@ -265,11 +270,13 @@ frame_jury/
   checks/
     presence.py      counting people/objects against the declaration
     identity.py      reference-vs-frame face and appearance similarity
+    vlm_scene.py     scene-level defects via local VLM yes/no scorer (budget="full")
     anatomy.py       hands/limbs plausibility
     legibility.py    text and flatness
   backends/          one adapter per model, all permissive
     detector_rtdetr.py, detector_torchvision.py
     face_yunet_sface.py
+    vlm_qwen3.py                  # local VLM scorer, optional (budget = "full")
     vlm_openai_compatible.py      # optional, only when budget = "full"
   calibration/       thresholds as data, per framing, fitted on the corpus
   evidence.py        the ledger every verdict writes
@@ -293,6 +300,33 @@ Core architectural principles:
 4. **No network at inference.** Weights are downloaded once, pinned by sha256,
    cached locally. The optional VLM backend is the single exception, and it is
    off by default.
+
+### Local VLM scoring (VQAScore vs verbalised generation)
+
+Under `budget="full"`, scene-level semantic defects (`duplicated_character`,
+`missing_entity`) can be evaluated by a local vision-language model using
+VQAScore (one yes/no question per defect, score = $P(\text{Yes}) / (P(\text{Yes}) + P(\text{No}))$
+at the first answer token via a single forward pass, with no autoregressive generation).
+
+Evidence measured by the orchestrator on 172 labelled frames (Qwen3-VL-8B-Instruct,
+Apache-2.0, 4-bit NF4 on an RTX 4070 Ti, 3.9 s/frame):
+- `duplicated_character`: AUC 0.94
+- `missing_entity`: AUC 0.78
+- Verbalised JSON probabilities scored AUC 0.50 (chance level) — generation/JSON
+  probabilities failed completely and must never be used.
+
+**Collective character guard.** A real-model smoke run on labelled frames
+revealed that asking whether any declared character appears more than once causes
+the VLM to answer "yes" on frames declaring collective characters (e.g. producing
+false `duplicated_character` findings at $P(\text{Yes}) = 0.679$ and $0.731$ on clean
+frames declaring "grupo misterioso", causing false rejects). A clone check must
+judge whether an individual was duplicated, never whether a group depicts several
+people. The entity contract allows character entities to declare `is_collective: true`.
+The VLM clone question is restricted to non-collective characters, naming them
+explicitly. If every declared character in the shot is collective, the check skips
+the clone question entirely and records an abstention (`all_characters_collective`)
+rather than a false reject or a silent pass.
+
 
 ## 7. Corpus and ground truth
 

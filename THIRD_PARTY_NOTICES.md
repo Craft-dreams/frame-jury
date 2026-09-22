@@ -16,8 +16,10 @@ be licensed commercially beside the AGPL (`COMMERCIAL-LICENSE.md`).
 | **RT-DETR (PekingU/rtdetr_r50vd)** | `df939e661d8c52e80608d1ec566561aabd25a4e7` | Apache-2.0 | RT-DETR-R50vd — person detector (`detector_rtdetr.py`); weights hosted at `https://huggingface.co/PekingU/rtdetr_r50vd` | `5263d5521eff3e356f6cd8a371fd5dfb891725beda5f713674f79669115cdc64` (model.safetensors LFS OID) |
 | **OpenCV Zoo YuNet** | 2023mar | MIT | YuNet — face detector (`face_yunet_sface.py`); weights downloaded from `https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx` | `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4` |
 | **OpenCV Zoo SFace** | 2021dec | Apache-2.0 | SFace — face recognizer embedding (`face_yunet_sface.py`); weights downloaded from `https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx` | `0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79` |
+| **Qwen3-VL-8B-Instruct** | commit pinned by orchestrator | Apache-2.0 | local VLM yes/no scene scoring (`vlm_qwen3.py`, `vlm_scene.py`); not bundled (downloaded by the user on demand) | n/a — HuggingFace Hub download |
 | **opencv-python / opencv-python-headless** | ≥4.8 | Apache-2.0 | executes FaceDetectorYN and FaceRecognizerSF inference; no weights vendored | n/a — host library |
-| **transformers** (HuggingFace) | ≥4.38 | Apache-2.0 | loads and runs RT-DETR inference; no weights vendored | n/a — host library |
+| **transformers** (HuggingFace) | ≥4.38 | Apache-2.0 | loads and runs RT-DETR and Qwen3-VL inference; no weights vendored | n/a — host library |
+| **bitsandbytes** | ≥0.43 | MIT / Apache-2.0 | 4-bit NF4 quantization for local VLM inference (`vlm_qwen3.py`); no weights vendored | n/a — host library |
 | **torch** (PyTorch) | ≥2.2 | BSD-3-Clause (PyTorch Foundation) | tensor inference for both backends | n/a — host library |
 | **Pillow** | ≥10 | HPND (MIT-compatible) | image loading for both backends | n/a — host library |
 
