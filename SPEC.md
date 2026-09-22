@@ -404,6 +404,27 @@ reported (2026-09-22), both open:
   for a character, generated with that character cloned. They stay as reported
   examples for measuring the appearance signal, nothing more.
 
+  **Measured 2026-09-22, and negative.** Eight clones (four labelled, four
+  reported) against the 70 clean-labelled frames with two or more foreground
+  people (box height ≥ 25% of the frame), taking the most similar pair of
+  people per frame:
+
+  | signal | clones: min / median | clean frames: median / max | clean frames ≥ weakest clone |
+  |---|---|---|---|
+  | mean-pooled MobileNetV3 features (the person detector's own backbone) | 0.852 / 0.867 | 0.869 / 0.929 | 42 of 70 |
+  | HSV colour histogram of the person crop | 0.524 / 0.892 | 0.739 / 0.988 | 56 of 70 |
+
+  The backbone carries no signal at all. Colour carries some — clones sit
+  higher — but two characters in similar clothes or uniforms reach 0.95–0.99.
+  Neither faces, generic features nor colour decide "the same person twice".
+  That is exactly what person re-identification models are trained for, and no
+  donor for it is catalogued yet: this measured deficiency is what licenses a
+  targeted search (`AGENTS.md`, research freeze), with the licence of both the
+  code and the **training data** of any re-id weights checked first, since the
+  standard re-id datasets are commonly research-only. The alternative is the
+  `full` budget's VLM, asked directly whether two people in the frame are the
+  same character.
+
 - **A reference sheet can itself be defective.** Identity measures a frame's
   distance to the reference, so a cloned or deformed reference poisons every
   shot of that character, and no frame-level check can see it. Judging the
