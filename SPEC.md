@@ -395,6 +395,22 @@ reported (2026-09-22), both open:
   needs a whole-person appearance signal, measured on these labels before it is
   built, not a face threshold.
 
+  Where the six came from matters for how they can be used. Two are corpus
+  frames and are now labelled `duplicated_character`. The other four are not
+  cases and must not be made into cases: three come from a run whose files no
+  longer exist, so no shot declaration survives for them, and inventing one
+  would be inventing the truth the judge compares against. The fourth is **not
+  a shot at all but a reference sheet** — the Production Bible's anchor image
+  for a character, generated with that character cloned. They stay as reported
+  examples for measuring the appearance signal, nothing more.
+
+- **A reference sheet can itself be defective.** Identity measures a frame's
+  distance to the reference, so a cloned or deformed reference poisons every
+  shot of that character, and no frame-level check can see it. Judging the
+  reference sheets themselves — one declared character, exactly one person —
+  is a natural use of the same presence and identity machinery, and belongs to
+  the factory's Production Bible stage as much as to this repository.
+
 Scoring `wrong_identity` uses **only** identity records. A case is positive when
 any of its characters is `different`, negative when every character with a
 reference is `same`, and excluded otherwise — including every case with no
