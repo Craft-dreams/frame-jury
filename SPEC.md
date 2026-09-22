@@ -90,6 +90,7 @@ adapter will speak exactly it.
   "shot": {
     "shot_id": "shot-scene-001-004",
     "framing": "close-up",            // the shot's camera framing
+    "other_people_allowed": true,     // optional, default true: background people are fine (§5)
     "declared_entities": [
       { "entity_id": "char-vigia", "kind": "character", "display_name": "O vigia",
         "aliases": ["guarda-noturno"], "visual_identity": "Homem grisalho…",
@@ -121,12 +122,13 @@ adapter will speak exactly it.
   "verdict": "accept" | "reject" | "unsure",
   "confidence": 0.0,
   "findings": [
-    { "check": "presence", "defect": "duplicated_character",
-      "entity_id": "char-vigia", "severity": "blocking", "confidence": 0.93,
+    { "check": "presence", "defect": "extra_person",
+      "severity": "blocking", "confidence": 0.93,
       "evidence": { "people_detected": 2, "declared_characters": 1,
+                    "other_people_allowed": false,
                     "boxes": [[12,40,180,420],[300,44,470,430]] },
-      "explanation": "the shot declares one character and two people are in frame",
-      "prompt_hint": "state that exactly one person is in frame; add a second person to the negative prompt" }
+      "explanation": "the shot declares one character and allows nobody else, and two people are in frame",
+      "prompt_hint": "state that nobody but the declared character is in frame; add people to the negative prompt" }
   ],
   "abstentions": [
     { "check": "identity", "reason": "no_face_in_frame",
@@ -166,8 +168,8 @@ Rules the verdict must obey:
 
 | defect | check | how it is decided |
 |---|---|---|
-| `duplicated_character` | presence | more people/faces in frame than the declared characters |
-| `extra_person` | presence | a person where none was declared |
+| `duplicated_character` | identity | the same declared character appears more than once — decided by face identity, never by counting people (not implemented yet; see below) |
+| `extra_person` | presence | more people than the declared characters, in a shot whose declaration sets `other_people_allowed: false` |
 | `missing_entity` | presence | a declared character/object not found |
 | `wrong_identity` | identity | face embedding distance to the entity's reference above threshold |
 | `broken_hands` | anatomy | hands or fingers have the wrong count, are fused or are malformed; this common defect may need a dedicated detector |
@@ -184,6 +186,43 @@ entities losing their boundary, unlike `wrong_scale`, where the entity remains
 distinct but has the wrong size. `broken_body` is malformed human anatomy,
 unlike `wrong_scale`, which compares an otherwise recognizable entity's size
 against its declared context.
+
+### Background people are not a defect
+
+Decided with the operator on 2026-09-22: **a background figure is never a
+defect, unless the shot says there is nobody else in it.** A library has
+readers and a street has pedestrians; a frame that shows them is correct. The
+factory's own image prompts already say this ("any other people the place calls
+for appear only as ordinary background figures"), so a judge that punished it
+would contradict the station that asked for it.
+
+The first reading of the labels forced it. Counting every detected person
+against the declared cast produced **31 false `duplicated_character` findings
+against 1 true one** on 67 labelled frames, and 29 of the 35 frames labelled
+clean were flagged — a child and an octopus in a library, with four readers
+behind them, detected at 0.93 and above.
+
+So the rule is structured, never read from prose:
+
+- `shot.other_people_allowed` is a boolean in the request, **default `true`**.
+  Only an explicit `false` makes surplus people a defect. frame-jury never infers
+  it from `positive_prompt`, `negative_prompt` or staging text — a prompt is a
+  projection, not the declaration.
+- Counting cannot tell a duplicate from a figurant, so **presence no longer
+  emits `duplicated_character`.** With `other_people_allowed: false`, any person
+  beyond the declared characters is `extra_person`, whether the shot declares
+  none or several. With `true`, surplus people are measured and reported in
+  `measurements`, and are not a finding.
+- `duplicated_character` belongs to identity: two faces that both match one
+  declared character's reference. It waits until identity's threshold is fitted
+  — on the same 67 labels, correct pairs of stylised characters score only
+  0.25–0.49 against their reference sheets, so identity is not yet reliable
+  enough to claim a duplicate.
+
+Until the factory's shot declaration carries a structured "nobody else here"
+fact, every factory case has `other_people_allowed: true`, and `extra_person`
+will not fire on the corpus. That is honest: the fact does not exist upstream
+yet, and inventing it from prompt prose is exactly what this rule forbids.
 
 The first detector release must ship `presence` and `identity` well. `anatomy`,
 `wrong_scale` and `legibility` are research tracks whose baselines the benchmark
