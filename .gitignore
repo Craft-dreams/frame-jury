@@ -17,3 +17,6 @@ __pycache__/
 .coverage
 htmlcov/
 .env
+
+# Labels are the operator's working data; publishing them is a deliberate act.
+benchmarks/labels/labels.jsonl
