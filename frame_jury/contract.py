@@ -64,6 +64,7 @@ class Entity:
     visual_identity: str = ""
     relative_scale: str = ""
     approximate_dimensions: str = ""
+    is_collective: bool = False
 
     @classmethod
     def from_dict(cls, d: dict[str, Any], location: str = "entity") -> "Entity":
@@ -84,6 +85,7 @@ class Entity:
             visual_identity=d.get("visual_identity", ""),
             relative_scale=d.get("relative_scale", ""),
             approximate_dimensions=d.get("approximate_dimensions", ""),
+            is_collective=_bool(d, "is_collective", location, default=False),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -98,6 +100,8 @@ class Entity:
             d["visual_identity"] = self.visual_identity
             d["relative_scale"] = self.relative_scale
             d["approximate_dimensions"] = self.approximate_dimensions
+        if self.is_collective:
+            d["is_collective"] = True
         return d
 
 
@@ -188,6 +192,9 @@ class Shot:
 
     def characters(self) -> list[Entity]:
         return [e for e in self.declared_entities if e.kind == "character"]
+
+    def non_collective_characters(self) -> list[Entity]:
+        return [e for e in self.characters() if not e.is_collective]
 
     def objects(self) -> list[Entity]:
         return [e for e in self.declared_entities if e.kind == "object"]

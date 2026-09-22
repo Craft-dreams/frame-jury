@@ -18,6 +18,7 @@ from frame_jury.checks.vlm_scene import (
 from frame_jury.contract import (
     DEFECT_DUPLICATED_CHARACTER,
     DEFECT_MISSING_ENTITY,
+    ContractError,
     Entity,
     JuryRequest,
     Shot,
@@ -57,12 +58,16 @@ def _make_shot(
     *,
     shot_id: str = "shot-001",
     framing: str = "close-up",
-    characters: list[str] | None = None,
+    characters: list[str | tuple[str, bool]] | None = None,
     objects: list[str] | None = None,
 ) -> Shot:
     entities: list[Entity] = []
     if characters:
-        for idx, name in enumerate(characters):
+        for idx, item in enumerate(characters):
+            if isinstance(item, tuple):
+                name, is_collective = item
+            else:
+                name, is_collective = item, False
             entities.append(
                 Entity(
                     entity_id=f"char-{idx}",
@@ -70,6 +75,7 @@ def _make_shot(
                     display_name=name,
                     aliases=(),
                     reference_images=(),
+                    is_collective=is_collective,
                 )
             )
     if objects:
@@ -309,6 +315,142 @@ class TestVlmSceneCheck(unittest.TestCase):
         verdict = judge(request, vlm_scorer=scorer, calibration=custom_cal)
         self.assertEqual(verdict.verdict, "accept")
         self.assertEqual(len(verdict.findings), 0)
+
+    def test_collective_only_shot_asks_no_clone_question_and_abstains(self) -> None:
+        """A shot where all declared characters are collective asks no clone question and abstains."""
+        shot = _make_shot(
+            characters=[("grupo misterioso", True)],
+            objects=["mapa antigo"],
+        )
+        # Stub scorer returns clean scores for any question asked
+        scorer = StubVlmScorer(scores=0.10)
+
+        request = JuryRequest(
+            schema_version="2.0",
+            image_path=str(self.image_path),
+            shot=shot,
+            checks=("vlm_scene",),
+            budget="full",
+        )
+        verdict = judge(request, vlm_scorer=scorer)
+
+        # Scorer must be called exactly once: only for missing_entity, NEVER for clone check
+        self.assertEqual(scorer.call_count, 1)
+        asked_questions = [call[1] for call in scorer.calls]
+        self.assertTrue(
+            all("Does any ONE of" not in q for q in asked_questions),
+            f"Clone question was asked on collective-only shot: {asked_questions}",
+        )
+        self.assertTrue(any("missing from the image" in q for q in asked_questions))
+
+        # Must record an abstention, never a finding, and verdict is unsure (never silent pass)
+        self.assertEqual(verdict.verdict, "unsure")
+        self.assertEqual(len(verdict.findings), 0)
+        self.assertEqual(len(verdict.abstentions), 1)
+        self.assertEqual(verdict.abstentions[0].check, "vlm_scene")
+        self.assertEqual(verdict.abstentions[0].reason, "all_characters_collective")
+        self.assertIn("collective", verdict.abstentions[0].explanation)
+        self.assertEqual(
+            verdict.measurements.get("vlm_duplicated_character_skipped"),
+            "all_characters_collective",
+        )
+
+    def test_mixed_shot_asks_about_non_collective_characters_only(self) -> None:
+        """A mixed shot asks clone question about non-collective characters only, naming exactly those."""
+        shot = _make_shot(
+            characters=[("Alice", False), ("grupo misterioso", True)],
+            objects=["Magic Key"],
+        )
+
+        # 1. Question text contains exactly the non-collective character names
+        question = build_duplicated_character_question(shot)
+        self.assertIn("Alice", question)
+        self.assertNotIn("grupo misterioso", question)
+        self.assertIn("Magic Key", question)
+
+        # 2. Scorer is called with clone question for Alice only
+        scorer = StubVlmScorer(
+            scores={
+                "Does any ONE of": 0.85,
+                "missing from the image": 0.10,
+            }
+        )
+        request = JuryRequest(
+            schema_version="2.0",
+            image_path=str(self.image_path),
+            shot=shot,
+            checks=("vlm_scene",),
+            budget="full",
+        )
+        verdict = judge(request, vlm_scorer=scorer)
+
+        self.assertEqual(scorer.call_count, 2)
+        clone_call_question = next(q for _, q in scorer.calls if "Does any ONE of" in q)
+        self.assertIn("Alice", clone_call_question)
+        self.assertNotIn("grupo misterioso", clone_call_question)
+
+        # Score was 0.85 > 0.50 threshold -> blocking finding on Alice
+        self.assertEqual(verdict.verdict, "reject")
+        self.assertEqual(len(verdict.findings), 1)
+        self.assertEqual(verdict.findings[0].defect, DEFECT_DUPLICATED_CHARACTER)
+        self.assertIn("Alice", verdict.findings[0].evidence["question"])
+        self.assertNotIn("grupo misterioso", verdict.findings[0].evidence["question"])
+
+    def test_unchanged_shot_behaves_as_before(self) -> None:
+        """A shot without collective flags behaves identically to before."""
+        shot = _make_shot(characters=["Hero", "Villain"])
+        question = build_duplicated_character_question(shot)
+        self.assertIn("Hero", question)
+        self.assertIn("Villain", question)
+
+        scorer = StubVlmScorer(scores=0.10)
+        request = JuryRequest(
+            schema_version="2.0",
+            image_path=str(self.image_path),
+            shot=shot,
+            checks=("vlm_scene",),
+            budget="full",
+        )
+        verdict = judge(request, vlm_scorer=scorer)
+
+        self.assertEqual(scorer.call_count, 2)
+        self.assertEqual(verdict.verdict, "accept")
+        self.assertEqual(len(verdict.findings), 0)
+        self.assertEqual(len(verdict.abstentions), 0)
+
+    def test_entity_is_collective_contract_parsing_and_serialization(self) -> None:
+        """Entity contract parses, validates and round-trips is_collective."""
+        # Defaults to False when omitted
+        raw_default = {
+            "entity_id": "char-1",
+            "kind": "character",
+            "display_name": "Hero",
+        }
+        e_default = Entity.from_dict(raw_default)
+        self.assertFalse(e_default.is_collective)
+        self.assertNotIn("is_collective", e_default.to_dict())
+
+        # Explicit True
+        raw_collective = {
+            "entity_id": "char-2",
+            "kind": "character",
+            "display_name": "Grupo",
+            "is_collective": True,
+        }
+        e_collective = Entity.from_dict(raw_collective)
+        self.assertTrue(e_collective.is_collective)
+        self.assertTrue(e_collective.to_dict()["is_collective"])
+
+        # Non-boolean raises ContractError
+        with self.assertRaises(ContractError):
+            Entity.from_dict(
+                {
+                    "entity_id": "char-3",
+                    "kind": "character",
+                    "display_name": "Invalid",
+                    "is_collective": "yes",
+                }
+            )
 
 
 class TestVlmQwen3Backend(unittest.TestCase):

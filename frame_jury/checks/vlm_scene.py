@@ -22,6 +22,7 @@ from frame_jury.contract import (
     DEFECT_DUPLICATED_CHARACTER,
     DEFECT_MISSING_ENTITY,
     Abstention,
+    Entity,
     Finding,
     Shot,
 )
@@ -29,10 +30,13 @@ from frame_jury.contract import (
 _CHECK_NAME = "vlm_scene"
 
 
-def format_declared_entities(shot: Shot) -> str:
-    """Format all declared entities from the shot declaration."""
+def format_declared_entities(
+    shot: Shot, entities: tuple[Entity, ...] | list[Entity] | None = None
+) -> str:
+    """Format declared entities from the shot declaration."""
     lines = []
-    for entity in shot.declared_entities:
+    entity_list = entities if entities is not None else shot.declared_entities
+    for entity in entity_list:
         lines.append(f"- {entity.display_name} ({entity.kind})")
     return "\n".join(lines) if lines else "None"
 
@@ -40,13 +44,17 @@ def format_declared_entities(shot: Shot) -> str:
 def build_duplicated_character_question(shot: Shot) -> str:
     """Build the yes/no question for duplicated_character.
 
-    Lists every declared character's name explicitly so the VLM knows which
-    identities must not appear duplicated.
+    Lists non-collective declared character names explicitly so the VLM knows which
+    identities must not appear duplicated. Collective characters are excluded.
     """
-    decl = format_declared_entities(shot)
-    char_names = [c.display_name for c in shot.characters()]
-    if char_names:
-        names_str = ", ".join(f"'{name}'" for name in char_names)
+    non_collective_chars = shot.non_collective_characters()
+    entities_to_show = [
+        e for e in shot.declared_entities
+        if not (e.kind == "character" and e.is_collective)
+    ]
+    decl = format_declared_entities(shot, entities=entities_to_show)
+    if non_collective_chars:
+        names_str = ", ".join(f"'{c.display_name}'" for c in non_collective_chars)
         char_clause = f"the declared character(s) ({names_str})"
     else:
         char_clause = "any declared character"
@@ -124,32 +132,49 @@ def run_vlm_scene_check(
     model_rev = vlm_scorer.revision()
 
     # 1. duplicated_character
-    q_dup = build_duplicated_character_question(shot)
-    p_dup = vlm_scorer.score_yes_no(image_path, q_dup)
-    thresh_dup = thresholds.vlm_duplicated_character_threshold
-    measurements["vlm_duplicated_character_p_yes"] = p_dup
-    measurements["vlm_duplicated_character_threshold"] = thresh_dup
+    characters = shot.characters()
+    non_collective_chars = shot.non_collective_characters()
 
-    if p_dup > thresh_dup:
-        findings.append(
-            Finding(
+    if characters and not non_collective_chars:
+        # Every declared character is collective: do not ask clone question; abstain.
+        abstentions.append(
+            Abstention(
                 check=_CHECK_NAME,
-                defect=DEFECT_DUPLICATED_CHARACTER,
-                severity="blocking",
-                confidence=p_dup,
-                evidence={
-                    "question": q_dup,
-                    "p_yes": p_dup,
-                    "model": model_name,
-                    "revision": model_rev,
-                },
+                reason="all_characters_collective",
                 explanation=(
-                    f"VLM detected duplicated character with probability {p_dup:.4f} "
-                    f"(threshold {thresh_dup:.4f})"
+                    "all declared characters are collective; "
+                    "duplicated_character check does not apply to groups"
                 ),
-                prompt_hint="ensure each declared character appears at most once in the scene",
             )
         )
+        measurements["vlm_duplicated_character_skipped"] = "all_characters_collective"
+    else:
+        q_dup = build_duplicated_character_question(shot)
+        p_dup = vlm_scorer.score_yes_no(image_path, q_dup)
+        thresh_dup = thresholds.vlm_duplicated_character_threshold
+        measurements["vlm_duplicated_character_p_yes"] = p_dup
+        measurements["vlm_duplicated_character_threshold"] = thresh_dup
+
+        if p_dup > thresh_dup:
+            findings.append(
+                Finding(
+                    check=_CHECK_NAME,
+                    defect=DEFECT_DUPLICATED_CHARACTER,
+                    severity="blocking",
+                    confidence=p_dup,
+                    evidence={
+                        "question": q_dup,
+                        "p_yes": p_dup,
+                        "model": model_name,
+                        "revision": model_rev,
+                    },
+                    explanation=(
+                        f"VLM detected duplicated character with probability {p_dup:.4f} "
+                        f"(threshold {thresh_dup:.4f})"
+                    ),
+                    prompt_hint="ensure each declared character appears at most once in the scene",
+                )
+            )
 
     # 2. missing_entity
     q_miss = build_missing_entity_question(shot)
