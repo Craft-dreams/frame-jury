@@ -115,6 +115,7 @@ def _make_shot(
     framing: str = "close-up",
     characters: int = 1,
     objects: int = 0,
+    other_people_allowed: bool = True,
 ) -> Shot:
     entities = []
     for i in range(characters):
@@ -133,6 +134,7 @@ def _make_shot(
             },
             "positive_prompt": "test prompt",
             "negative_prompt": "",
+            "other_people_allowed": other_people_allowed,
         }
     )
 
@@ -285,6 +287,71 @@ class TestContractRoundTrip(unittest.TestCase):
         self.assertIn("prompt_hint", d)
         f2 = Finding.from_dict(d)
         self.assertEqual(f2.prompt_hint, "state that exactly one person is in frame")
+
+    def test_other_people_allowed_default_is_true(self) -> None:
+        """A request dict without other_people_allowed parses to True."""
+        raw = {
+            "schema_version": "2.0",
+            "image_path": "/tmp/shot.png",
+            "shot": {
+                "shot_id": "shot-001",
+                "framing": "close-up",
+                "declared_entities": [],
+                "staging": {"purpose": "p", "must_render": [], "composition": []},
+                "positive_prompt": "p",
+                "negative_prompt": "",
+            },
+        }
+        req = JuryRequest.from_dict(raw)
+        self.assertTrue(req.shot.other_people_allowed)
+
+    def test_other_people_allowed_false_round_trip(self) -> None:
+        """{"other_people_allowed": false} parses to False and survives a to_dict/from_dict round trip."""
+        raw = {
+            "schema_version": "2.0",
+            "image_path": "/tmp/shot.png",
+            "shot": {
+                "shot_id": "shot-001",
+                "framing": "close-up",
+                "declared_entities": [],
+                "staging": {"purpose": "p", "must_render": [], "composition": []},
+                "positive_prompt": "p",
+                "negative_prompt": "",
+                "other_people_allowed": False,
+            },
+        }
+        req = JuryRequest.from_dict(raw)
+        self.assertFalse(req.shot.other_people_allowed)
+        d = req.shot.to_dict()
+        self.assertIn("other_people_allowed", d)
+        self.assertIs(d["other_people_allowed"], False)
+        shot2 = Shot.from_dict(d)
+        self.assertFalse(shot2.other_people_allowed)
+
+        # Also full JuryRequest round-trip:
+        req2 = JuryRequest.from_dict(req.to_dict())
+        self.assertFalse(req2.shot.other_people_allowed)
+
+    def test_other_people_allowed_malformed_raises_contract_error(self) -> None:
+        """{"other_people_allowed": "false"} and {"other_people_allowed": 0} raise ContractError."""
+        for malformed in ["false", 0, 1, None, []]:
+            raw = {
+                "schema_version": "2.0",
+                "image_path": "/tmp/shot.png",
+                "shot": {
+                    "shot_id": "shot-001",
+                    "framing": "close-up",
+                    "declared_entities": [],
+                    "staging": {"purpose": "p", "must_render": [], "composition": []},
+                    "positive_prompt": "p",
+                    "negative_prompt": "",
+                    "other_people_allowed": malformed,
+                },
+            }
+            with self.assertRaises(ContractError) as ctx:
+                JuryRequest.from_dict(raw)
+            self.assertIn("other_people_allowed", str(ctx.exception))
+
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -461,12 +528,17 @@ class TestPresenceCheck(unittest.TestCase):
         detected_people: int,
         framing: str = "close-up",
         abstain_on_empty: bool = True,
+        other_people_allowed: bool = True,
     ):
         from frame_jury.calibration.thresholds import CalibrationFile
         from frame_jury.checks.presence import run_presence_check
 
         image = _make_image(tmp)
-        shot = _make_shot(framing=framing, characters=declared_characters)
+        shot = _make_shot(
+            framing=framing,
+            characters=declared_characters,
+            other_people_allowed=other_people_allowed,
+        )
         detector = _StubDetector(people=detected_people)
 
         # Build a calibration that lets us control abstain_on_empty.
@@ -515,38 +587,83 @@ class TestPresenceCheck(unittest.TestCase):
         self.assertEqual(findings, [])
         self.assertEqual(abstentions, [])
 
-    def test_duplicated_character(self) -> None:
-        """1 declared, 2 detected → duplicated_character (SPEC.md §5)."""
+    def test_background_people_allowed_by_default_one_declared(self) -> None:
+        """1 declared, 2 detected, other_people_allowed default → no findings, background_people == 1."""
         with tempfile.TemporaryDirectory() as d:
-            findings, abstentions, measurements, _ = self._run(Path(d), declared_characters=1, detected_people=2)
-        self.assertEqual(len(findings), 1)
+            findings, abstentions, measurements, _ = self._run(
+                Path(d), declared_characters=1, detected_people=2
+            )
+        self.assertEqual(findings, [])
         self.assertEqual(abstentions, [])
-        self.assertEqual(findings[0].defect, "duplicated_character")
-        self.assertEqual(findings[0].severity, "blocking")
-        self.assertIn("people_detected", findings[0].evidence)
-        self.assertEqual(findings[0].evidence["people_detected"], 2)
-        self.assertEqual(findings[0].evidence["declared_characters"], 1)
-        # boxes must be present (SPEC.md §4 — every finding carries its evidence)
-        self.assertIn("boxes", findings[0].evidence)
-        self.assertEqual(len(findings[0].evidence["boxes"]), 2)
+        self.assertEqual(measurements["background_people"], 1)
+        self.assertTrue(measurements["other_people_allowed"])
 
-    def test_extra_person_no_character_declared(self) -> None:
-        """0 declared, 1 detected → extra_person (SPEC.md §5)."""
+    def test_establishing_street_shot_background_people(self) -> None:
+        """0 declared, 3 detected, default → no findings (an establishing street shot), background_people == 3."""
         with tempfile.TemporaryDirectory() as d:
-            findings, abstentions, _, _ = self._run(Path(d), declared_characters=0, detected_people=1)
-        self.assertEqual(len(findings), 1)
+            findings, abstentions, measurements, _ = self._run(
+                Path(d), declared_characters=0, detected_people=3
+            )
+        self.assertEqual(findings, [])
         self.assertEqual(abstentions, [])
-        self.assertEqual(findings[0].defect, "extra_person")
-        self.assertEqual(findings[0].severity, "blocking")
+        self.assertEqual(measurements["background_people"], 3)
+        self.assertTrue(measurements["other_people_allowed"])
 
-    def test_extra_person_multiple(self) -> None:
-        """0 declared, 3 detected → extra_person."""
+    def test_extra_person_one_declared_forbidden(self) -> None:
+        """1 declared, 2 detected, other_people_allowed=False → exactly one extra_person, surplus == 1, no entity_id."""
         with tempfile.TemporaryDirectory() as d:
-            findings, abstentions, _, _ = self._run(Path(d), declared_characters=0, detected_people=3)
+            findings, abstentions, measurements, _ = self._run(
+                Path(d), declared_characters=1, detected_people=2, other_people_allowed=False
+            )
         self.assertEqual(len(findings), 1)
         self.assertEqual(abstentions, [])
-        self.assertEqual(findings[0].defect, "extra_person")
-        self.assertEqual(findings[0].evidence["people_detected"], 3)
+        f = findings[0]
+        self.assertEqual(f.defect, "extra_person")
+        self.assertEqual(f.severity, "blocking")
+        self.assertEqual(f.evidence["surplus"], 1)
+        self.assertEqual(f.evidence["people_detected"], 2)
+        self.assertEqual(f.evidence["declared_characters"], 1)
+        self.assertFalse(f.evidence["other_people_allowed"])
+        self.assertIn("boxes", f.evidence)
+        self.assertEqual(f.entity_id, "")
+        self.assertFalse(measurements["other_people_allowed"])
+
+    def test_extra_person_zero_declared_forbidden(self) -> None:
+        """0 declared, 1 detected, other_people_allowed=False → exactly one extra_person."""
+        with tempfile.TemporaryDirectory() as d:
+            findings, abstentions, measurements, _ = self._run(
+                Path(d), declared_characters=0, detected_people=1, other_people_allowed=False
+            )
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(abstentions, [])
+        f = findings[0]
+        self.assertEqual(f.defect, "extra_person")
+        self.assertEqual(f.severity, "blocking")
+        self.assertEqual(f.evidence["surplus"], 1)
+        self.assertEqual(f.entity_id, "")
+
+    def test_correct_count_other_people_forbidden(self) -> None:
+        """2 declared, 2 detected, other_people_allowed=False → no findings."""
+        with tempfile.TemporaryDirectory() as d:
+            findings, abstentions, measurements, _ = self._run(
+                Path(d), declared_characters=2, detected_people=2, other_people_allowed=False
+            )
+        self.assertEqual(findings, [])
+        self.assertEqual(abstentions, [])
+        self.assertNotIn("background_people", measurements)
+        self.assertFalse(measurements["other_people_allowed"])
+
+    def test_presence_never_emits_duplicated_character(self) -> None:
+        """No test anywhere produces duplicated_character from presence: assert it for 1-declared/2-detected under both values of the flag."""
+        with tempfile.TemporaryDirectory() as d:
+            findings_allowed, _, _, _ = self._run(
+                Path(d), declared_characters=1, detected_people=2, other_people_allowed=True
+            )
+            findings_forbidden, _, _, _ = self._run(
+                Path(d), declared_characters=1, detected_people=2, other_people_allowed=False
+            )
+        self.assertFalse(any(f.defect == "duplicated_character" for f in findings_allowed))
+        self.assertFalse(any(f.defect == "duplicated_character" for f in findings_forbidden))
 
     def test_missing_entity_abstain_by_default(self) -> None:
         """1 declared, 0 detected → unsure (first-class Abstention) when abstain=True."""
@@ -581,14 +698,21 @@ class TestPresenceCheck(unittest.TestCase):
     def test_findings_carry_evidence(self) -> None:
         """Every finding must carry its evidence numbers (SPEC.md §4)."""
         with tempfile.TemporaryDirectory() as d:
-            findings, _, _, _ = self._run(Path(d), declared_characters=1, detected_people=2)
+            findings, _, _, _ = self._run(
+                Path(d), declared_characters=1, detected_people=2, other_people_allowed=False
+            )
+        self.assertEqual(len(findings), 1)
         self.assertTrue(all("people_detected" in f.evidence for f in findings))
         self.assertTrue(all("declared_characters" in f.evidence for f in findings))
+        self.assertTrue(all("surplus" in f.evidence for f in findings))
 
     def test_prompt_hint_present(self) -> None:
         """prompt_hint must be set on every finding (SPEC.md §4)."""
         with tempfile.TemporaryDirectory() as d:
-            findings, _, _, _ = self._run(Path(d), declared_characters=1, detected_people=2)
+            findings, _, _, _ = self._run(
+                Path(d), declared_characters=1, detected_people=2, other_people_allowed=False
+            )
+        self.assertEqual(len(findings), 1)
         self.assertTrue(all(f.prompt_hint for f in findings))
 
     def test_elapsed_ms_is_positive(self) -> None:
@@ -619,7 +743,14 @@ class TestPresenceCheck(unittest.TestCase):
 class TestJuryRouter(unittest.TestCase):
     """jury.judge with a stub detector — no torch, no network."""
 
-    def _judge(self, tmp: Path, characters: int, detected_people: int, checks=None):
+    def _judge(
+        self,
+        tmp: Path,
+        characters: int,
+        detected_people: int,
+        checks=None,
+        other_people_allowed: bool = True,
+    ):
         from frame_jury.calibration.thresholds import CalibrationFile
         from frame_jury.jury import judge
 
@@ -663,6 +794,7 @@ class TestJuryRouter(unittest.TestCase):
                         },
                         "positive_prompt": "test",
                         "negative_prompt": "",
+                        "other_people_allowed": other_people_allowed,
                     },
                     "checks": checks or ["presence"],
                     "budget": "cheap",
@@ -677,12 +809,12 @@ class TestJuryRouter(unittest.TestCase):
             verdict = self._judge(Path(d), characters=1, detected_people=1)
         self.assertEqual(verdict.verdict, "accept")
 
-    def test_reject_duplicated_character(self) -> None:
+    def test_reject_extra_person_when_forbidden(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            verdict = self._judge(Path(d), characters=1, detected_people=2)
+            verdict = self._judge(Path(d), characters=1, detected_people=2, other_people_allowed=False)
         self.assertEqual(verdict.verdict, "reject")
         self.assertEqual(len(verdict.findings), 1)
-        self.assertEqual(verdict.findings[0].defect, "duplicated_character")
+        self.assertEqual(verdict.findings[0].defect, "extra_person")
 
     def test_unsure_missing_entity_default_calibration(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -706,18 +838,23 @@ class TestJuryRouter(unittest.TestCase):
             verdict = self._judge(Path(d), characters=1, detected_people=2)
         self.assertIn("people_detected", verdict.measurements)
         self.assertEqual(verdict.measurements["people_detected"], 2)
+        self.assertIn("background_people", verdict.measurements)
+        self.assertEqual(verdict.measurements["background_people"], 1)
+        self.assertTrue(verdict.measurements["other_people_allowed"])
 
     def test_early_stop_on_blocking(self) -> None:
         """budget=cheap: only one check runs; early stop on blocking finding."""
         with tempfile.TemporaryDirectory() as d:
-            verdict = self._judge(Path(d), characters=1, detected_people=2, checks=["presence"])
+            verdict = self._judge(
+                Path(d), characters=1, detected_people=2, checks=["presence"], other_people_allowed=False
+            )
         # Only presence ran (identity is M3); verdict is reject.
         self.assertEqual(verdict.verdict, "reject")
         self.assertEqual(len(verdict.timings_ms), 1)
 
     def test_extra_person_reject(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            verdict = self._judge(Path(d), characters=0, detected_people=1)
+            verdict = self._judge(Path(d), characters=0, detected_people=1, other_people_allowed=False)
         self.assertEqual(verdict.verdict, "reject")
         self.assertEqual(verdict.findings[0].defect, "extra_person")
 

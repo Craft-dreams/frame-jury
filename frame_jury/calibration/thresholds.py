@@ -35,7 +35,7 @@ class FramingThresholds:
     person_score_threshold: float
     missing_entity_abstain_on_empty: bool
     extra_person_confidence: float
-    duplicated_character_confidence: float
+    duplicated_character_confidence: float  # reserved for identity-based duplicate detection (SPEC §5)
     missing_entity_confidence: float
 
     # Identity thresholds (M3)

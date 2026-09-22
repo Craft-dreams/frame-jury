@@ -12,19 +12,20 @@ detector's output and compares it to:
   - ``shot.framing`` (a close-up and a wide shot fail differently).
 
 Defects produced (SPEC.md §5):
-  ``duplicated_character``
-      More people detected than characters declared.  The shot said one person;
-      the frame has two — contract violation.
-
   ``extra_person``
-      At least one person detected, but the shot declared *no* characters at
-      all.  The declaration is "no person"; any person in the frame is extra.
+      More people detected than declared characters, in a shot whose declaration
+      sets ``other_people_allowed: false``.  With ``other_people_allowed: true``
+      (the default), background figures are measured in ``measurements`` and are
+      not a defect.
 
   ``missing_entity``
       A character or named object is declared but the detector finds nobody.
       Only characters trigger the person-count path; objects are out of scope
       for the person detector (they would need a dedicated detector) and are
       noted as ``unsure`` when no object-specific backend is present.
+
+  Note: ``duplicated_character`` belongs to the identity check (decided by
+  face embeddings, not by counting people) and is not emitted by presence.
 
 ``unsure`` semantics (SPEC.md §4):
     "A judge that guesses is worse than one that abstains."  When the detector
@@ -44,7 +45,6 @@ from typing import Any
 from frame_jury.backends.base import Detection, DetectorBackend
 from frame_jury.calibration.thresholds import CalibrationFile, load_defaults
 from frame_jury.contract import (
-    DEFECT_DUPLICATED_CHARACTER,
     DEFECT_EXTRA_PERSON,
     DEFECT_MISSING_ENTITY,
     Abstention,
@@ -114,16 +114,17 @@ def run_presence_check(
         "people_detected": people_detected,
         "declared_characters": declared_characters,
         "person_score_threshold": thresholds.person_score_threshold,
+        "other_people_allowed": shot.other_people_allowed,
     }
 
     findings: list[Finding] = []
     abstentions: list[Abstention] = []
 
-    # ── Case 1: no character declared ───────────────────────────────────────
-    # If the shot declares no characters at all but the detector finds a person,
-    # that is an extra_person defect.
-    if declared_characters == 0:
-        if people_detected > 0:
+    # ── Surplus people: defect only when other_people_allowed is False ────────
+    surplus = people_detected - declared_characters
+
+    if surplus > 0:
+        if not shot.other_people_allowed:
             findings.append(
                 Finding(
                     check=_CHECK_NAME,
@@ -132,57 +133,26 @@ def run_presence_check(
                     confidence=thresholds.extra_person_confidence,
                     evidence={
                         "people_detected": people_detected,
-                        "declared_characters": 0,
+                        "declared_characters": declared_characters,
+                        "other_people_allowed": False,
+                        "surplus": surplus,
                         "boxes": boxes,
                     },
                     explanation=(
-                        f"the shot declares no characters but "
-                        f"{people_detected} person(s) detected in frame"
+                        f"the shot declares {declared_characters} character(s) and "
+                        f"allows nobody else, but {people_detected} people detected in frame"
                     ),
                     prompt_hint=(
-                        "add a person to the negative prompt, or declare "
-                        "the character in the shot"
+                        "state that nobody but the declared character(s) is in frame; "
+                        "add people to the negative prompt"
                     ),
                 )
             )
-        # No characters declared and none detected: clean for this check.
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        return findings, abstentions, measurements, elapsed_ms
+        else:
+            measurements["background_people"] = surplus
 
-    # ── Case 2: characters declared ─────────────────────────────────────────
-
-    # 2a. More people than declared → duplicated_character
-    if people_detected > declared_characters:
-        extra = people_detected - declared_characters
-        # Report against each declared character entity (the declaration is the
-        # contract; we don't know which detection is the duplicate).
-        entity_id = characters[0].entity_id if characters else ""
-        findings.append(
-            Finding(
-                check=_CHECK_NAME,
-                defect=DEFECT_DUPLICATED_CHARACTER,
-                severity="blocking",
-                confidence=thresholds.duplicated_character_confidence,
-                evidence={
-                    "people_detected": people_detected,
-                    "declared_characters": declared_characters,
-                    "extra_count": extra,
-                    "boxes": boxes,
-                },
-                explanation=(
-                    f"the shot declares {declared_characters} character(s) but "
-                    f"{people_detected} people detected in frame"
-                ),
-                entity_id=entity_id,
-                prompt_hint=(
-                    f"state that exactly {declared_characters} person(s) "
-                    "are in frame; add the extra person(s) to the negative prompt"
-                ),
-            )
-        )
-
-    # 2b. Zero people detected but characters declared → missing_entity or unsure
-    elif people_detected == 0:
+    # ── Zero people detected but characters declared → missing_entity or unsure
+    elif people_detected == 0 and declared_characters > 0:
         if thresholds.missing_entity_abstain_on_empty:
             # Abstain: we cannot tell a blank image from an extreme wide shot
             # without labels. Emit unsure via a first-class Abstention (SPEC.md §4).
