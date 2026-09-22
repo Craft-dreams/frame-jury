@@ -6,12 +6,11 @@ cleared. This file is how the work is done, not what is built.
 
 ## The one idea this project must not lose
 
-Every other tool judges a frame blind. This one judges it **against the
-declaration that asked for it**: which entities must be visible, of what kind,
-what the character looks like, how the shot is framed, what the prompt asked and
-forbade. Detectors provide evidence; the declaration decides what the evidence
-means. Any design that drifts toward "a better detector, applied to an image"
-has lost the point.
+frame-jury judges a frame **against the declaration that asked for it**: which
+entities must be visible, of what kind, what the character looks like, how the
+shot is framed, and what the prompt asked for and forbade. Detectors provide
+evidence; the declaration decides what the evidence means. Any design that
+drifts toward "a better detector, applied to an image" has lost the point.
 
 ## Licensing, which is a hard boundary and not a preference
 
@@ -42,11 +41,11 @@ there. Do not route around it.
 
 ## The corpus is borrowed, and read-only
 
-Cases are built from Content Factory runs on the operator's machine
-(`build/runs/**`). Those directories are **input, opened read-only**. Never
-write into them, never move them, and never commit an image, an audio file or a
-run artefact into this repository. The corpus builder emits case files that
-*point at* paths; labels are stored here, images are not.
+Cases are built from external generator runs (`build/runs/**`). Those
+directories are **input, opened read-only**. Never write into them, never move
+them, and never commit an image, an audio file or a run artefact into this
+repository. The corpus builder emits case files that *point at* paths; labels
+are stored here, images are not.
 
 ## How work lands
 

@@ -1,21 +1,15 @@
 # frame-jury
 
-Judges a generated frame against the contract that asked for it.
+frame-jury is a generator-independent judge for still images. It receives a
+generated frame plus the shot declaration that requested it: the entities that
+must be visible, their kinds and reference images, the camera framing, and the
+positive and negative prompts.
 
-Every public tool for this judges an image blind: one compares two faces,
-another counts what it recognises, another finds broken limbs, a vision model
-gives an opinion. None of them knows what the image was *supposed* to show — so
-each one has to guess whether two people in a frame are a mistake.
-
-frame-jury starts from the declaration instead. A shot says which entities must
-be visible, what kind each one is, what the character looks like (an approved
-reference image), how it is framed, and what the prompt asked for and forbade.
-Against that, "two people where one was declared" is not a guess: it is a
-contract violation, with the numbers to prove it.
-
-It uses detectors as evidence, not as opinions, and it says `unsure` when the
-evidence does not settle the question — a judge that guesses is worse than one
-that abstains.
+It returns a structured JSON verdict — `accept`, `reject`, or `unsure` — with
+auditable findings, abstentions, measurements, timings, and detector metadata.
+Detectors supply evidence; the declaration determines what that evidence means.
+For example, two detected people are a contract violation only when the
+declaration requires one person and disallows anyone else.
 
 ## Status
 
@@ -38,12 +32,12 @@ Requirements: Python 3.12 or newer. M1 uses only the standard library; it needs
 no package installation, network access, model weights, or GPU. Run commands
 from the repository root.
 
-Build cases from the Content Factory runs. The builder only reads the run tree;
-each case stores absolute paths to the existing images and no image is copied:
+Build cases from a compatible generator run tree. The builder only reads the
+run tree; each case points to the existing images and no image is copied:
 
 ```powershell
 python -m benchmarks.corpus.build `
-  --runs C:\path\to\content-factory\build\runs `
+  --runs ..\your-project\build\runs `
   --out benchmarks\cases\cases.jsonl
 ```
 
@@ -127,7 +121,7 @@ from frame_jury.jury import judge
 
 request = JuryRequest.from_json(json.dumps({
     "schema_version": "2.0",
-    "image_path": "/path/to/shot-scene-001-004.png",
+    "image_path": "../your-project/frames/shot-scene-001-004.png",
     "shot": {
         "shot_id": "shot-scene-001-004",
         "framing": "close-up",
@@ -137,7 +131,7 @@ request = JuryRequest.from_json(json.dumps({
                 "kind": "character",
                 "display_name": "O vigia",
                 "aliases": ["guarda-noturno"],
-                "reference_images": ["/path/to/reference-sheet/char-vigia.png"]
+                "reference_images": ["../your-project/references/char-vigia.png"]
             }
         ],
         "staging": {
@@ -194,7 +188,7 @@ To override thresholds for a specific run (e.g. a custom calibration file):
 
 ```python
 from frame_jury.calibration.thresholds import CalibrationFile
-cal = CalibrationFile.load("/path/to/my-thresholds.json")
+cal = CalibrationFile.load("./my-thresholds.json")
 verdict = judge(request, calibration=cal)
 ```
 
