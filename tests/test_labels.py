@@ -7,8 +7,12 @@ from pathlib import Path
 
 from benchmarks.corpus.schema import write_cases
 from benchmarks.label.schema import (
+    DECISIONS,
+    DEFECT_DESCRIPTIONS_PT,
     DEFECTS,
+    DEFECTS_V2_0,
     LABEL_SCHEMA_VERSION,
+    LEGACY_TAXONOMY_VERSION,
     TAXONOMY_VERSION,
     LabelValidationError,
     validate_label,
@@ -30,9 +34,26 @@ def label(case_id: str, defects: list[str]) -> dict[str, object]:
 
 
 class LabelTests(unittest.TestCase):
-    def test_taxonomy_shortcut_order_has_ten_current_defects(self) -> None:
+    def test_taxonomy_shortcut_order_has_twelve_current_defects(self) -> None:
         self.assertEqual(
             DEFECTS,
+            (
+                "duplicated_character",
+                "broken_hands",
+                "extra_person",
+                "missing_entity",
+                "wrong_identity",
+                "broken_body",
+                "wrong_scale",
+                "fused_objects",
+                "garbled_text",
+                "empty_or_flat",
+                "broken_face",
+                "wrong_interaction",
+            ),
+        )
+        self.assertEqual(
+            DEFECTS_V2_0,
             (
                 "duplicated_character",
                 "broken_hands",
@@ -136,7 +157,53 @@ class LabelTests(unittest.TestCase):
         self.assertIn("entity.display_name", javascript)
         self.assertIn("entity.visual_identity", javascript)
         self.assertIn("entity.relative_scale", javascript)
-        self.assertIn('const shortcuts = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]', javascript)
+        self.assertIn('const shortcuts = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "="]', javascript)
+
+    def test_v2_1_labels_with_new_defects_validate(self) -> None:
+        lbl_face = label("run-a/shot-1", ["broken_face"])
+        self.assertEqual(validate_label(lbl_face)["taxonomy_version"], "2.1")
+
+        lbl_interaction = label("run-a/shot-1", ["wrong_interaction"])
+        self.assertEqual(validate_label(lbl_interaction)["taxonomy_version"], "2.1")
+
+    def test_v2_0_label_with_old_slugs_validates(self) -> None:
+        lbl_v2 = label("run-a/shot-1", ["broken_body", "broken_hands"])
+        lbl_v2["taxonomy_version"] = "2.0"
+        validated = validate_label(lbl_v2)
+        self.assertEqual(validated["taxonomy_version"], "2.0")
+        self.assertEqual(validated["defects"], ["broken_body", "broken_hands"])
+
+    def test_v2_0_label_with_broken_face_is_rejected(self) -> None:
+        lbl_v2 = label("run-a/shot-1", ["broken_face"])
+        lbl_v2["taxonomy_version"] = "2.0"
+        with self.assertRaisesRegex(LabelValidationError, "defects may contain only"):
+            validate_label(lbl_v2)
+
+    def test_label_with_invalid_taxonomy_version_is_rejected(self) -> None:
+        invalid = label("run-a/shot-1", ["clean"])
+        invalid["taxonomy_version"] = "1.9"
+        with self.assertRaises(LabelValidationError) as ctx:
+            validate_label(invalid)
+        self.assertIn("2.1", str(ctx.exception))
+        self.assertIn("2.0", str(ctx.exception))
+
+    def test_every_decision_has_non_empty_portuguese_description(self) -> None:
+        for decision in DECISIONS:
+            self.assertIn(decision, DEFECT_DESCRIPTIONS_PT)
+            self.assertTrue(len(DEFECT_DESCRIPTIONS_PT[decision].strip()) > 0)
+
+    @unittest.skipUnless(
+        (Path(__file__).parents[1] / "benchmarks" / "labels" / "labels.jsonl").exists(),
+        "real labels.jsonl not present",
+    )
+    def test_real_labels_file_validates(self) -> None:
+        path = Path(__file__).parents[1] / "benchmarks" / "labels" / "labels.jsonl"
+        with path.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                validate_label(record)
 
     def test_queue_prioritizes_character_count_then_framing_and_groups_runs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

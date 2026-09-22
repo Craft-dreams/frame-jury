@@ -90,6 +90,8 @@ button {
   text-align: left;
 }
 button:hover, button.selected { border-color: #c9f067; background: #303923; }
+.defect-name { display: block; font-weight: 500; }
+.defect-desc { display: block; margin-top: .2rem; font-size: .72rem; color: #9296a1; line-height: 1.25; }
 kbd { color: #c9f067; margin-right: .35rem; }
 label { display: block; margin: 1rem 0 .35rem; }
 textarea { width: 100%; resize: vertical; color: inherit; background: #101114; border: 1px solid #454955; padding: .65rem; }
