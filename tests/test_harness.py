@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,7 @@ from benchmarks.competitors import (
 from benchmarks.corpus.schema import write_cases
 from benchmarks.run import (
     get_pinned_versions,
+    identity_truth,
     render_leaderboard,
     run_benchmark,
 )
@@ -62,6 +64,83 @@ class StubFaceBackend(FaceBackend):
 
 
 class HarnessTests(unittest.TestCase):
+    def test_identity_truth_uses_complete_latest_pair_decisions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            cases = []
+
+            def identity_case(case_id: str, entity_ids: list[str]) -> dict[str, Any]:
+                case = make_case(root, "run", case_id)
+                case["shot"]["declared_entities"] = [
+                    {"entity_id": entity_id, "kind": "character"}
+                    for entity_id in entity_ids
+                ]
+                case["reference_images"] = {
+                    entity_id: [f"{entity_id}.png"] for entity_id in entity_ids
+                }
+                cases.append(case)
+                return case
+
+            different = identity_case("different", ["a"])
+            same = identity_case("same", ["a", "b"])
+            partial = identity_case("partial", ["a", "b"])
+            not_visible = identity_case("not-visible", ["a"])
+            overridden = identity_case("overridden", ["a"])
+            records = [
+                {"case_id": different["case_id"], "entity_id": "a", "decision": "different"},
+                {"case_id": same["case_id"], "entity_id": "a", "decision": "same"},
+                {"case_id": same["case_id"], "entity_id": "b", "decision": "same"},
+                {"case_id": partial["case_id"], "entity_id": "a", "decision": "same"},
+                {"case_id": not_visible["case_id"], "entity_id": "a", "decision": "not_visible"},
+                {"case_id": overridden["case_id"], "entity_id": "a", "decision": "different"},
+                {"case_id": overridden["case_id"], "entity_id": "a", "decision": "same"},
+            ]
+            path = root / "identity.jsonl"
+            path.write_text(
+                "".join(json.dumps(record) + "\n" for record in records),
+                encoding="utf-8",
+            )
+
+            truth = identity_truth(path, cases)
+            self.assertIs(truth[different["case_id"]], True)
+            self.assertIs(truth[same["case_id"]], False)
+            self.assertNotIn(partial["case_id"], truth)
+            self.assertNotIn(not_visible["case_id"], truth)
+            self.assertIs(truth[overridden["case_id"]], False)
+
+    def test_wrong_identity_scoring_uses_identity_truth_not_frame_labels(self) -> None:
+        defect = "wrong_identity"
+        results = {
+            "tp": CompetitorResult(frozenset([defect]), frozenset()),
+            "fp": CompetitorResult(frozenset([defect]), frozenset()),
+            "fn": CompetitorResult(frozenset(), frozenset()),
+        }
+        frame_labels = {"tp": {"clean"}, "fp": {defect}, "fn": {"clean"}}
+        truth = {"tp": True, "fp": False, "fn": True}
+
+        scored = score(results, frame_labels, defect, identity_truth=truth)
+
+        self.assertEqual(scored["tp"], 1.0)
+        self.assertEqual(scored["fp"], 1.0)
+        self.assertEqual(scored["fn"], 1.0)
+
+    def test_wrong_identity_without_identity_truth_has_no_metrics(self) -> None:
+        defect = "wrong_identity"
+        results = {"case": CompetitorResult(frozenset([defect]), frozenset())}
+        scored = score(results, {"case": {defect}}, defect, identity_truth=None)
+        self.assertIsNone(scored["precision"])
+        self.assertIsNone(scored["recall"])
+        self.assertIsNone(scored["f1"])
+
+    def test_identity_truth_does_not_change_other_defect_scoring(self) -> None:
+        defect = "broken_hands"
+        results = {"case": CompetitorResult(frozenset([defect]), frozenset())}
+        labels = {"case": {defect}}
+        self.assertEqual(
+            score(results, labels, defect),
+            score(results, labels, defect, identity_truth={"case": False}),
+        )
+
     def test_scoring_maths_hand_calculated(self) -> None:
         """Precision, recall, and F1 match hand-calculated values on known TP/FP/FN."""
         # 4 cases:
@@ -109,7 +188,7 @@ class HarnessTests(unittest.TestCase):
         labels_a = {
             "c1": {defect},  # FN=1
         }
-        s_a = score(results_a, labels_a, defect)
+        s_a = score(results_a, labels_a, defect, identity_truth={"c1": True})
         self.assertIsNone(s_a["precision"])
         self.assertEqual(s_a["recall"], 0.0)
         self.assertIsNone(s_a["f1"])  # P is None -> F1 is None
@@ -121,7 +200,7 @@ class HarnessTests(unittest.TestCase):
         labels_b = {
             "c1": {"clean"},  # FP=1
         }
-        s_b = score(results_b, labels_b, defect)
+        s_b = score(results_b, labels_b, defect, identity_truth={"c1": False})
         self.assertEqual(s_b["precision"], 0.0)
         self.assertIsNone(s_b["recall"])
         self.assertIsNone(s_b["f1"])  # R is None -> F1 is None
@@ -135,7 +214,12 @@ class HarnessTests(unittest.TestCase):
             "c1": {"clean"},
             "c2": {defect},
         }
-        s_c = score(results_c, labels_c, defect)
+        s_c = score(
+            results_c,
+            labels_c,
+            defect,
+            identity_truth={"c1": False, "c2": True},
+        )
         self.assertEqual(s_c["precision"], 0.0)
         self.assertEqual(s_c["recall"], 0.0)
         self.assertIsNone(s_c["f1"], "F1 must be None when Precision + Recall is 0.0")
@@ -199,7 +283,7 @@ class HarnessTests(unittest.TestCase):
             "c1": {defect},
             "c2": {defect},
         }
-        s = score(results, labels, defect)
+        s = score(results, labels, defect, identity_truth={"c1": True, "c2": True})
         # c2 abstained: excluded from recall denominator.
         # c1 is TP.
         self.assertEqual(s["precision"], 1.0)
@@ -301,6 +385,7 @@ class HarnessTests(unittest.TestCase):
             timestamp=timestamp,
             pinned_versions=pinned,
             rows=[row1, row2],
+            identity_labelled_count=3,
         )
 
         # Order [row2, row1]
@@ -312,9 +397,11 @@ class HarnessTests(unittest.TestCase):
             timestamp=timestamp,
             pinned_versions=pinned,
             rows=[row2, row1],
+            identity_labelled_count=3,
         )
 
         self.assertEqual(content_a, content_b, "Renderer must sort rows deterministically")
+        self.assertIn("- **Identity-labelled cases**: 3", content_a)
         # System 'frame-jury' comes before 'null' alphabetically
         pos_fj = content_a.index("| frame-jury |")
         pos_null = content_a.index("| null |")

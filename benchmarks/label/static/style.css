@@ -98,6 +98,31 @@ textarea { width: 100%; resize: vertical; color: inherit; background: #101114; b
 #message.error { color: #ff8e8e; }
 #done { min-height: 70vh; display: grid; place-content: center; text-align: center; }
 #done[hidden], main[hidden] { display: none; }
+a { color: #c9f067; }
+
+.identity-workspace {
+  grid-template-columns: minmax(280px, .7fr) minmax(480px, 1.3fr);
+}
+.identity-reference-panel, .identity-frame-panel { min-width: 0; }
+.identity-description { color: #d7d8dc; line-height: 1.45; }
+.reference-face { display: block; width: min(100%, 420px); max-height: 52vh; object-fit: contain; background: #090a0c; }
+.reference-full { display: block; width: min(100%, 220px); max-height: 180px; margin-top: .8rem; object-fit: contain; background: #090a0c; }
+.full-reference-large { width: min(100%, 520px); max-height: 62vh; }
+.identity-faces { display: flex; gap: .75rem; overflow-x: auto; padding-bottom: .5rem; }
+.identity-face { flex: 0 0 180px; padding: .45rem; text-align: center; }
+.identity-face strong { display: block; color: #c9f067; font-size: 2rem; line-height: 1; margin-bottom: .4rem; }
+.identity-face img { display: block; width: 100%; height: 180px; object-fit: contain; background: #090a0c; }
+.frame-overlay { position: relative; display: block; width: fit-content; max-width: 100%; margin-top: 1rem; }
+#identity-frame { display: block; width: auto; max-width: min(100%, 640px); max-height: 360px; object-fit: contain; background: #090a0c; }
+.face-boxes { position: absolute; inset: 0; pointer-events: none; }
+.face-box { position: absolute; border: 3px solid #c9f067; color: #101114; background: rgba(201, 240, 103, .85); font-size: 1.2rem; font-weight: 800; line-height: 1.2; }
+.identity-decision-panel { grid-column: 1 / -1; }
+.identity-actions { grid-template-columns: repeat(4, minmax(170px, 1fr)); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+#identity-message { min-height: 1.2em; }
+#identity-message.error { color: #ff8e8e; }
+#identity-done { min-height: 70vh; display: grid; place-content: center; text-align: center; }
+#identity-done[hidden] { display: none; }
 
 @media (max-width: 900px) {
   main { grid-template-columns: 1fr; }
@@ -108,4 +133,6 @@ textarea { width: 100%; resize: vertical; color: inherit; background: #101114; b
   .staging { grid-template-columns: 1fr; }
   .staging h2 { grid-column: auto; }
   .buttons { grid-template-columns: repeat(2, 1fr); }
+  .identity-workspace { grid-template-columns: 1fr; }
+  .identity-actions { grid-template-columns: 1fr; }
 }

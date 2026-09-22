@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Rotular identidade — frame-jury</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body class="identity-page">
+    <header>
+      <div>
+        <h1>frame-jury</h1>
+        <p>Compare cada personagem com a referência.</p>
+        <a href="/">Rotular quadros</a>
+      </div>
+      <div id="identity-progress" class="progress" aria-live="polite">Carregando…</div>
+    </header>
+    <main id="identity-workspace" class="identity-workspace" hidden>
+      <section class="identity-reference-panel">
+        <h2 id="identity-name"></h2>
+        <p id="visual-identity" class="identity-description"></p>
+        <img id="reference-face" class="reference-face" alt="Rosto de referência">
+        <p id="no-reference-face" hidden>Nenhum rosto encontrado na referência</p>
+        <img id="reference-full" class="reference-full" alt="Imagem de referência completa">
+      </section>
+      <section class="identity-frame-panel">
+        <h2>Qual destes rostos é este personagem?</h2>
+        <div id="frame-faces" class="identity-faces"></div>
+        <p id="no-frame-faces" hidden>Nenhum rosto encontrado no quadro</p>
+        <div id="frame-overlay" class="frame-overlay">
+          <img id="identity-frame" alt="Quadro completo">
+          <div id="face-boxes" class="face-boxes" aria-hidden="true"></div>
+        </div>
+      </section>
+      <section class="identity-decision-panel">
+        <div class="buttons identity-actions">
+          <button id="same" type="button"><kbd>Enter</kbd> É ele / é ela</button>
+          <button id="different" type="button"><kbd>D</kbd> Aparece, mas está diferente</button>
+          <button id="not-visible" type="button"><kbd>A</kbd> O rosto não aparece</button>
+          <button id="unsure" type="button"><kbd>U</kbd> Não sei</button>
+        </div>
+        <p class="hint"><kbd>Esc</kbd> Limpar seleção</p>
+        <p id="identity-message" role="alert"></p>
+      </section>
+    </main>
+    <section id="identity-done" hidden>
+      <h2>Tudo rotulado. Pode fechar esta página.</h2>
+    </section>
+    <script src="/identity.js"></script>
+  </body>
+</html>

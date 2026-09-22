@@ -15,6 +15,7 @@ from typing import Any
 
 from benchmarks.competitors import Competitor, CompetitorResult, FrameJuryCompetitor, NullCompetitor
 from benchmarks.corpus.schema import iter_cases
+from benchmarks.label.identity import identity_pairs
 from benchmarks.label.schema import DEFECTS
 from benchmarks.scoring import score
 
@@ -59,6 +60,44 @@ def load_labels(path: str | Path | None) -> dict[str, set[str]]:
     return labels
 
 
+def identity_truth(
+    identity_path: str | Path | None,
+    cases: list[dict[str, Any]],
+) -> dict[str, bool]:
+    """Return case-level wrong-identity truth from latest per-character records."""
+    if identity_path is None or not Path(identity_path).exists():
+        return {}
+
+    wanted_pairs = {
+        (case["case_id"], entity_id)
+        for case in cases
+        for entity_id in identity_pairs(case)
+    }
+    latest: dict[tuple[str, str], str] = {}
+    with Path(identity_path).open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            pair = (record.get("case_id"), record.get("entity_id"))
+            if pair in wanted_pairs:
+                latest[pair] = record.get("decision")
+
+    truth: dict[str, bool] = {}
+    for case in cases:
+        pairs = [(case["case_id"], entity_id) for entity_id in identity_pairs(case)]
+        if not pairs or any(pair not in latest for pair in pairs):
+            continue
+        decisions = [latest[pair] for pair in pairs]
+        if any(decision in {"not_visible", "unsure"} for decision in decisions):
+            continue
+        if any(decision == "different" for decision in decisions):
+            truth[case["case_id"]] = True
+        elif all(decision == "same" for decision in decisions):
+            truth[case["case_id"]] = False
+    return truth
+
+
 def render_leaderboard(
     *,
     split_name: str,
@@ -68,6 +107,7 @@ def render_leaderboard(
     timestamp: str,
     pinned_versions: dict[str, str],
     rows: list[dict[str, Any]],
+    identity_labelled_count: int = 0,
 ) -> str:
     """Render deterministic markdown leaderboard text."""
     lines: list[str] = [
@@ -76,6 +116,7 @@ def render_leaderboard(
         f"- **Split**: {split_name}",
         f"- **Cases**: {case_count}",
         f"- **Labelled**: {labelled_count}",
+        f"- **Identity-labelled cases**: {identity_labelled_count}",
         f"- **Excluded legacy (`broken_anatomy`)**: {excluded_legacy_count}",
         f"- **Timestamp**: {timestamp}",
         "- **Pinned versions**:",
@@ -119,6 +160,7 @@ def run_benchmark(
     cases_path: str | Path,
     *,
     labels_path: str | Path | None = None,
+    identity_labels_path: str | Path | None = "benchmarks/labels/identity.jsonl",
     splits_path: str | Path | None = None,
     split: str = "test",
     out_path: str | Path = "benchmarks/LEADERBOARD.md",
@@ -164,6 +206,7 @@ def run_benchmark(
     case_ids = {c["case_id"] for c in cases}
     labels_all = load_labels(labels_path)
     split_labels = {cid: labels_all[cid] for cid in case_ids if cid in labels_all}
+    split_identity_truth = identity_truth(identity_labels_path, cases)
     labelled_count = len(split_labels)
     excluded_legacy_count = sum(1 for lbls in split_labels.values() if "broken_anatomy" in lbls)
 
@@ -199,7 +242,12 @@ def run_benchmark(
         peak_mb = peak_bytes / (1024 * 1024)
 
         for defect in DEFECTS:
-            s = score(last_results, split_labels, defect)
+            s = score(
+                last_results,
+                split_labels,
+                defect,
+                identity_truth=split_identity_truth,
+            )
             abstain_pct = (s["abstain_rate"] * 100.0) if s["abstain_rate"] is not None else None
             rows.append(
                 {
@@ -228,6 +276,7 @@ def run_benchmark(
         timestamp=timestamp,
         pinned_versions=pinned_versions,
         rows=rows,
+        identity_labelled_count=len(split_identity_truth),
     )
 
     out = Path(out_path)
@@ -249,6 +298,12 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("benchmarks/labels/labels.jsonl"),
         help="Path to ground-truth labels JSONL file (optional)",
+    )
+    parser.add_argument(
+        "--identity-labels",
+        type=Path,
+        default=Path("benchmarks/labels/identity.jsonl"),
+        help="Path to identity ground-truth JSONL file (optional)",
     )
     parser.add_argument(
         "--splits",
@@ -283,6 +338,7 @@ def main(argv: list[str] | None = None) -> int:
         run_benchmark(
             cases_path=args.cases,
             labels_path=args.labels,
+            identity_labels_path=args.identity_labels,
             splits_path=args.splits,
             split=args.split,
             out_path=args.out,

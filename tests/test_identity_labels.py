@@ -279,6 +279,10 @@ class IdentityServerTests(unittest.TestCase):
         with urlopen(self.base_url + path) as response:
             return json.load(response)
 
+    def get_text(self, path: str) -> str:
+        with urlopen(self.base_url + path) as response:
+            return response.read().decode("utf-8")
+
     def post_json(self, path: str, payload: dict[str, object]) -> tuple[int, dict[str, object]]:
         request = Request(
             self.base_url + path,
@@ -344,6 +348,14 @@ class IdentityServerTests(unittest.TestCase):
         self.assertIn("decision", response["error"])
         existing = self.get_json("/api/next")
         self.assertEqual(existing["case"]["case_id"], self.case["case_id"])
+
+    def test_identity_page_script_and_frame_page_link_are_served(self) -> None:
+        self.assertIn(
+            "Qual destes rostos é este personagem?",
+            self.get_text("/identity"),
+        )
+        self.assertIn("loadNext", self.get_text("/identity.js"))
+        self.assertIn('href="/identity"', self.get_text("/"))
 
 
 if __name__ == "__main__":
