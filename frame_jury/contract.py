@@ -136,6 +136,7 @@ class Shot:
     positive_prompt: str
     negative_prompt: str
     other_people_allowed: bool = True
+    expected_people_count: int | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any], location: str = "shot") -> "Shot":
@@ -154,10 +155,13 @@ class Shot:
             positive_prompt=d.get("positive_prompt", ""),
             negative_prompt=d.get("negative_prompt", ""),
             other_people_allowed=_bool(d, "other_people_allowed", location, default=True),
+            expected_people_count=_optional_nonnegative_int(
+                d, "expected_people_count", location
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "shot_id": self.shot_id,
             "framing": self.framing,
             "declared_entities": [e.to_dict() for e in self.declared_entities],
@@ -166,6 +170,9 @@ class Shot:
             "negative_prompt": self.negative_prompt,
             "other_people_allowed": self.other_people_allowed,
         }
+        if self.expected_people_count is not None:
+            d["expected_people_count"] = self.expected_people_count
+        return d
 
     # Convenience helpers used by the checks.
 
@@ -507,5 +514,16 @@ def _bool(d: dict[str, Any], key: str, location: str, default: bool = True) -> b
     v = d.get(key, default)
     if not isinstance(v, bool):
         raise ContractError(f"{location}.{key}: must be a bool")
+    return v
+
+
+def _optional_nonnegative_int(
+    d: dict[str, Any], key: str, location: str
+) -> int | None:
+    v = d.get(key)
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+        raise ContractError(f"{location}.{key}: must be a non-negative integer or null")
     return v
 

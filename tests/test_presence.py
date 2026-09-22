@@ -116,27 +116,29 @@ def _make_shot(
     characters: int = 1,
     objects: int = 0,
     other_people_allowed: bool = True,
+    expected_people_count: int | None = None,
 ) -> Shot:
     entities = []
     for i in range(characters):
         entities.append(_entity(f"char-{i:03d}", "character"))
     for i in range(objects):
         entities.append(_entity(f"obj-{i:03d}", "object"))
-    return Shot.from_dict(
-        {
-            "shot_id": "shot-test-001",
-            "framing": framing,
-            "declared_entities": entities,
-            "staging": {
-                "purpose": "A test scene.",
-                "must_render": [],
-                "composition": [],
-            },
-            "positive_prompt": "test prompt",
-            "negative_prompt": "",
-            "other_people_allowed": other_people_allowed,
-        }
-    )
+    raw = {
+        "shot_id": "shot-test-001",
+        "framing": framing,
+        "declared_entities": entities,
+        "staging": {
+            "purpose": "A test scene.",
+            "must_render": [],
+            "composition": [],
+        },
+        "positive_prompt": "test prompt",
+        "negative_prompt": "",
+        "other_people_allowed": other_people_allowed,
+    }
+    if expected_people_count is not None:
+        raw["expected_people_count"] = expected_people_count
+    return Shot.from_dict(raw)
 
 
 def _make_request(tmp: Path, framing: str = "close-up", characters: int = 1) -> JuryRequest:
@@ -352,6 +354,20 @@ class TestContractRoundTrip(unittest.TestCase):
                 JuryRequest.from_dict(raw)
             self.assertIn("other_people_allowed", str(ctx.exception))
 
+    def test_negative_expected_people_count_raises_contract_error(self) -> None:
+        raw = {
+            "shot_id": "shot-001",
+            "framing": "close-up",
+            "declared_entities": [],
+            "staging": {"purpose": "p", "must_render": [], "composition": []},
+            "positive_prompt": "p",
+            "negative_prompt": "",
+            "expected_people_count": -1,
+        }
+        with self.assertRaises(ContractError) as ctx:
+            Shot.from_dict(raw)
+        self.assertIn("expected_people_count", str(ctx.exception))
+
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -529,6 +545,7 @@ class TestPresenceCheck(unittest.TestCase):
         framing: str = "close-up",
         abstain_on_empty: bool = True,
         other_people_allowed: bool = True,
+        expected_people_count: int | None = None,
     ):
         from frame_jury.calibration.thresholds import CalibrationFile
         from frame_jury.checks.presence import run_presence_check
@@ -538,6 +555,7 @@ class TestPresenceCheck(unittest.TestCase):
             framing=framing,
             characters=declared_characters,
             other_people_allowed=other_people_allowed,
+            expected_people_count=expected_people_count,
         )
         detector = _StubDetector(people=detected_people)
 
@@ -571,6 +589,69 @@ class TestPresenceCheck(unittest.TestCase):
             tmp_path.unlink(missing_ok=True)
 
         return findings, abstentions, measurements, elapsed_ms
+
+    def test_explicit_zero_rejects_detected_person_when_others_forbidden(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            findings, abstentions, measurements, _ = self._run(
+                Path(d),
+                declared_characters=1,
+                detected_people=1,
+                other_people_allowed=False,
+                expected_people_count=0,
+            )
+        self.assertEqual([finding.defect for finding in findings], ["extra_person"])
+        self.assertEqual(abstentions, [])
+        self.assertEqual(measurements["expected_people_count"], 0)
+
+    def test_explicit_one_with_one_detected_is_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            findings, abstentions, measurements, _ = self._run(
+                Path(d),
+                declared_characters=0,
+                detected_people=1,
+                other_people_allowed=False,
+                expected_people_count=1,
+            )
+        self.assertEqual(findings, [])
+        self.assertEqual(abstentions, [])
+        self.assertEqual(measurements["expected_people_count"], 1)
+
+    def test_collective_entity_explicit_two_with_two_detected_is_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            findings, abstentions, _, _ = self._run(
+                Path(d),
+                declared_characters=1,
+                detected_people=2,
+                other_people_allowed=False,
+                expected_people_count=2,
+            )
+        self.assertEqual(findings, [])
+        self.assertEqual(abstentions, [])
+
+    def test_collective_entity_explicit_two_rejects_three_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            findings, abstentions, _, _ = self._run(
+                Path(d),
+                declared_characters=1,
+                detected_people=3,
+                other_people_allowed=False,
+                expected_people_count=2,
+            )
+        self.assertEqual([finding.defect for finding in findings], ["extra_person"])
+        self.assertEqual(findings[0].evidence["expected_people_count"], 2)
+        self.assertEqual(abstentions, [])
+
+    def test_explicit_two_reports_one_detected_as_missing_entity(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            findings, abstentions, _, _ = self._run(
+                Path(d),
+                declared_characters=1,
+                detected_people=1,
+                expected_people_count=2,
+            )
+        self.assertEqual([finding.defect for finding in findings], ["missing_entity"])
+        self.assertEqual(findings[0].evidence["shortage"], 1)
+        self.assertEqual(abstentions, [])
 
     def test_correct_count_no_findings(self) -> None:
         """1 declared, 1 detected → no findings (SPEC.md §5)."""

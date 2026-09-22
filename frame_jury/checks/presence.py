@@ -9,6 +9,8 @@ This check is the core idea of the project (AGENTS.md §the-one-idea):
 The check never modifies the image or the declaration.  It reads the
 detector's output and compares it to:
   - ``shot.declared_entities`` (which entities must be visible, of what kind);
+  - ``shot.expected_people_count`` when an explicit count overrides the number
+    of declared character entities;
   - ``shot.framing`` (a close-up and a wide shot fail differently).
 
 Defects produced (SPEC.md §5):
@@ -98,6 +100,11 @@ def run_presence_check(
 
     thresholds = calibration.for_framing(shot.framing)
     declared_characters = shot.declared_character_count
+    expected_people = (
+        shot.expected_people_count
+        if shot.expected_people_count is not None
+        else declared_characters
+    )
     characters = shot.characters()
 
     # ── Run the detector ────────────────────────────────────────────────────
@@ -116,32 +123,43 @@ def run_presence_check(
         "person_score_threshold": thresholds.person_score_threshold,
         "other_people_allowed": shot.other_people_allowed,
     }
+    if shot.expected_people_count is not None:
+        measurements["expected_people_count"] = expected_people
 
     findings: list[Finding] = []
     abstentions: list[Abstention] = []
 
     # ── Surplus people: defect only when other_people_allowed is False ────────
-    surplus = people_detected - declared_characters
+    surplus = people_detected - expected_people
 
     if surplus > 0:
         if not shot.other_people_allowed:
+            evidence: dict[str, Any] = {
+                "people_detected": people_detected,
+                "declared_characters": declared_characters,
+                "other_people_allowed": False,
+                "surplus": surplus,
+                "boxes": boxes,
+            }
+            if shot.expected_people_count is not None:
+                evidence["expected_people_count"] = expected_people
+                explanation = (
+                    f"the shot expects {expected_people} person(s) and "
+                    f"allows nobody else, but {people_detected} people detected in frame"
+                )
+            else:
+                explanation = (
+                    f"the shot declares {declared_characters} character(s) and "
+                    f"allows nobody else, but {people_detected} people detected in frame"
+                )
             findings.append(
                 Finding(
                     check=_CHECK_NAME,
                     defect=DEFECT_EXTRA_PERSON,
                     severity="blocking",
                     confidence=thresholds.extra_person_confidence,
-                    evidence={
-                        "people_detected": people_detected,
-                        "declared_characters": declared_characters,
-                        "other_people_allowed": False,
-                        "surplus": surplus,
-                        "boxes": boxes,
-                    },
-                    explanation=(
-                        f"the shot declares {declared_characters} character(s) and "
-                        f"allows nobody else, but {people_detected} people detected in frame"
-                    ),
+                    evidence=evidence,
+                    explanation=explanation,
                     prompt_hint=(
                         "state that nobody but the declared character(s) is in frame; "
                         "add people to the negative prompt"
@@ -152,6 +170,31 @@ def run_presence_check(
             measurements["background_people"] = surplus
 
     # ── Zero people detected but characters declared → missing_entity or unsure
+    elif shot.expected_people_count is not None and people_detected < expected_people:
+        shortage = expected_people - people_detected
+        findings.append(
+            Finding(
+                check=_CHECK_NAME,
+                defect=DEFECT_MISSING_ENTITY,
+                severity="blocking",
+                confidence=thresholds.missing_entity_confidence,
+                evidence={
+                    "people_detected": people_detected,
+                    "declared_characters": declared_characters,
+                    "expected_people_count": expected_people,
+                    "shortage": shortage,
+                    "boxes": boxes,
+                },
+                explanation=(
+                    f"the shot expects {expected_people} person(s), but only "
+                    f"{people_detected} detected in frame"
+                ),
+                prompt_hint="ensure every expected person is visible and not obscured",
+            )
+        )
+
+    # Preserve the legacy zero-detection behaviour exactly when the explicit
+    # target is absent.
     elif people_detected == 0 and declared_characters > 0:
         if thresholds.missing_entity_abstain_on_empty:
             # Abstain: we cannot tell a blank image from an extreme wide shot

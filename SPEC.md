@@ -91,6 +91,7 @@ adapter will speak exactly it.
     "shot_id": "shot-scene-001-004",
     "framing": "close-up",            // the shot's camera framing
     "other_people_allowed": true,     // optional, default true: background people are fine (§5)
+    "expected_people_count": 1,       // optional non-negative integer; defaults to derived character count
     "declared_entities": [
       { "entity_id": "char-vigia", "kind": "character", "display_name": "O vigia",
         "aliases": ["guarda-noturno"], "visual_identity": "Homem grisalho…",
@@ -113,6 +114,14 @@ adapter will speak exactly it.
   "budget": "cheap"                   // cheap = local only; full = may call a VLM
 }
 ```
+
+`shot.expected_people_count` optionally states the exact number of people the
+frame should contain and overrides the count derived from declared character
+entities. This lets one collective character entity such as “dois vizinhos”
+require two people, while a non-person entity such as an octopus can require
+zero, without inventing entity ids and corrupting identity. When omitted, the
+derived character count remains unchanged; `other_people_allowed` still decides
+whether people beyond the expected count are defects.
 
 ```jsonc
 // verdict
