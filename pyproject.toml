@@ -22,10 +22,6 @@ vlm = [
     "bitsandbytes>=0.43",
     "accelerate>=0.26",
 ]
-competitors = [
-    "ultralytics>=8.0.0",
-    "insightface>=0.7.3",
-]
 dev = [
     "pytest>=8.0",
 ]

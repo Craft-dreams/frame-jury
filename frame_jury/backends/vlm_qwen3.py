@@ -29,9 +29,9 @@ from frame_jury.backends.base import VlmScorerBackend
 MODEL_ID: str = "Qwen/Qwen3-VL-8B-Instruct"
 
 # Pinned model revision / commit hash.
-# TODO(orchestrator): fill verified commit hash for Qwen3-VL-8B-Instruct after GPU measurement.
+# Revision measured in the lab (T3b) and verified against the Hugging Face API, 2026-09-22.
 # Do NOT invent a hash.
-MODEL_REVISION: str = "TODO_ORCHESTRATOR_FILL_VERIFIED_COMMIT_HASH"
+MODEL_REVISION: str = "0c351dd01ed87e9c1b53cbc748cba10e6187ff3b"
 
 
 class Qwen3VlmScorer(VlmScorerBackend):

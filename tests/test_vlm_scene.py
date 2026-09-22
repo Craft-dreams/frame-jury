@@ -317,10 +317,7 @@ class TestVlmQwen3Backend(unittest.TestCase):
     def test_constants_and_lazy_import(self) -> None:
         """Module can be imported without downloading model weights or requiring torch."""
         self.assertEqual(MODEL_ID, "Qwen/Qwen3-VL-8B-Instruct")
-        self.assertTrue(
-            MODEL_REVISION.startswith("TODO"),
-            f"MODEL_REVISION should have a TODO for orchestrator, got: {MODEL_REVISION}",
-        )
+        self.assertRegex(MODEL_REVISION, r"^[0-9a-f]{40}$")
 
         scorer = Qwen3VlmScorer()
         self.assertEqual(scorer.name(), "qwen3-vl-8b-instruct")
