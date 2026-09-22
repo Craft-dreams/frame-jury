@@ -72,12 +72,28 @@ Going straight to the expensive model "to be safe" is the exact failure this
 section exists to prevent. `gemini-3.1-pro-high` and the thinking Claude models
 are available and are the default for nothing.
 
-### Recorded deviation
+### Recorded deviations
 
-M2 (presence) was implemented on `claude-sonnet-4-6` before this rule was
+**M2 — presence.** Implemented on `claude-sonnet-4-6` before this rule was
 tightened, on the reasoning that the presence logic needed judgement. Under the
 rule above that was the wrong call: the judgement should have gone into the
 brief instead. M3 onwards runs on the medium tier.
+
+**D2 — the scene chain (`movement-director`, 2026-09-22).** Implemented on a
+Claude Sonnet subagent rather than on `agy` at the medium tier. The same mistake
+as M2, made again after the rule existed, and it deserves naming: the
+orchestrator reached for a Claude subagent because that was the tool already in
+hand, not because the work needed the tier.
+
+Two things are worth keeping from it. The brief did carry the judgement — the
+projection shape, the `sets_state` decision and the refusal to infer state from
+verbs were all resolved before sending — so the deviation was in the *model*,
+not in the method. And the implementation was verified adversarially afterwards
+rather than trusted, which is what caught that `chain_invariant_mismatch` had no
+proving case among the author's own tests.
+
+`movement-director` has no `DELEGATION.md` of its own; its `SPEC.md` §9 points
+here, so its deviations are recorded here.
 
 ## Token exhaustion, which is expected and planned for
 
