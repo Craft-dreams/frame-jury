@@ -6,9 +6,10 @@ from datetime import datetime
 from typing import Any
 
 LABEL_SCHEMA_VERSION = "2.0"
-TAXONOMY_VERSION = "2.0"
+TAXONOMY_VERSION = "2.1"
+LEGACY_TAXONOMY_VERSION = "2.0"
 LEGACY_LABEL_SCHEMA_VERSION = "1.0"
-DEFECTS = (
+DEFECTS_V2_0 = (
     "duplicated_character",
     "broken_hands",
     "extra_person",
@@ -20,7 +21,34 @@ DEFECTS = (
     "garbled_text",
     "empty_or_flat",
 )
+DECISIONS_V2_0 = frozenset((*DEFECTS_V2_0, "clean", "uncertain"))
+
+DEFECTS = (
+    *DEFECTS_V2_0,
+    "broken_face",
+    "wrong_interaction",
+)
 DECISIONS = frozenset((*DEFECTS, "clean", "uncertain"))
+
+DEFECT_DESCRIPTIONS_PT: dict[str, str] = {
+    "duplicated_character": "O mesmo personagem aparece mais de uma vez",
+    "broken_hands": "Mãos ou dedos deformados, fundidos ou em número errado",
+    "extra_person": "Há gente onde a cena diz que não há mais ninguém",
+    "missing_entity": "Um personagem ou objeto declarado não aparece",
+    "wrong_identity": "O personagem não parece a pessoa da ficha de referência",
+    "broken_body": "Corpo, membros, articulações ou pose impossíveis",
+    "wrong_scale": "Tamanho ou proporção errada em relação à cena ou aos outros",
+    "fused_objects": "Dois objetos ou entidades se fundiram num só",
+    "garbled_text": "Texto ilegível ou que não forma palavras",
+    "empty_or_flat": "Quadro vazio, chapado ou sem detalhe",
+    "broken_face": "Rosto deformado, derretido ou com feições fora do lugar",
+    "wrong_interaction": (
+        "Objeto segurado ou usado de forma errada ou impossível "
+        "(pegada errada, flutuando, atravessando a mão)"
+    ),
+    "clean": "Nada errado",
+    "uncertain": "Não tenho certeza",
+}
 LEGACY_DEFECTS = (
     "duplicated_character",
     "extra_person",
@@ -52,7 +80,6 @@ def validate_label(value: Any, *, known_case_ids: set[str] | None = None) -> dic
             "labeller",
             "at",
         }
-        decisions = DECISIONS
     elif schema_version == LEGACY_LABEL_SCHEMA_VERSION:
         expected = {"schema_version", "case_id", "defects", "notes", "labeller", "at"}
         decisions = LEGACY_DECISIONS
@@ -67,8 +94,16 @@ def validate_label(value: Any, *, known_case_ids: set[str] | None = None) -> dic
         raise LabelValidationError(f"label missing field(s): {', '.join(sorted(missing))}")
     if extra:
         raise LabelValidationError(f"label has unknown field(s): {', '.join(sorted(extra))}")
-    if schema_version == LABEL_SCHEMA_VERSION and value["taxonomy_version"] != TAXONOMY_VERSION:
-        raise LabelValidationError(f"taxonomy_version must equal {TAXONOMY_VERSION!r}")
+    if schema_version == LABEL_SCHEMA_VERSION:
+        taxonomy_version = value["taxonomy_version"]
+        if taxonomy_version == TAXONOMY_VERSION:
+            decisions = DECISIONS
+        elif taxonomy_version == LEGACY_TAXONOMY_VERSION:
+            decisions = DECISIONS_V2_0
+        else:
+            raise LabelValidationError(
+                f"taxonomy_version must equal {TAXONOMY_VERSION!r} or {LEGACY_TAXONOMY_VERSION!r}"
+            )
     case_id = value["case_id"]
     if not isinstance(case_id, str) or not case_id.strip():
         raise LabelValidationError("case_id must be a non-empty string")

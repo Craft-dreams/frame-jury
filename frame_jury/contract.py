@@ -39,6 +39,12 @@ DEFECT_MISSING_ENTITY = "missing_entity"
 # Identity defects (SPEC.md §5)
 DEFECT_WRONG_IDENTITY = "wrong_identity"
 
+# Anatomy defects (SPEC.md §5)
+DEFECT_BROKEN_FACE = "broken_face"
+
+# Interaction defects (SPEC.md §5)
+DEFECT_WRONG_INTERACTION = "wrong_interaction"
+
 
 # ──────────────────────────────────────────────────────────
 # Request side

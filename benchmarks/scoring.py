@@ -37,9 +37,10 @@ def score(
 
     Rules (SPEC.md §7, §8):
     1. 'uncertain' cases are excluded from scoring entirely, never guessed.
-    2. Legacy schema-1.0 'broken_anatomy' means "body or hands, unspecified".
-       It is excluded from scoring both 'broken_body' and 'broken_hands', and
-       reported in the excluded tally.
+    2. Legacy exclusions: schema-1.0 'broken_anatomy' means "body or hands, unspecified"
+       and is excluded from scoring both 'broken_body' and 'broken_hands'; taxonomy-2.0
+       'broken_body' means "body or face, unspecified" and is excluded from scoring
+       'broken_face'. Both are reported in the excluded tally.
     3. An abstention is neither a positive nor a negative. Exclude the case from
        that defect's precision and recall, and report the abstention rate.
     4. ``wrong_identity`` is scored only from the separate identity pass.
@@ -92,8 +93,13 @@ def score(
         if "uncertain" in gt_defects:
             continue
 
-        # Rule 2: legacy 'broken_anatomy' excluded from broken_body and broken_hands
+        # Rule 2: legacy exclusions
+        # - schema-1.0 'broken_anatomy' excluded from broken_body and broken_hands
         if defect in ("broken_body", "broken_hands") and "broken_anatomy" in gt_defects:
+            excluded_legacy += 1
+            continue
+        # - taxonomy-2.0 'broken_body' excluded from broken_face (means "body or face, unspecified")
+        if defect == "broken_face" and "broken_body_v2_0" in gt_defects:
             excluded_legacy += 1
             continue
 
