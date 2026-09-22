@@ -54,6 +54,32 @@ agy --dangerously-skip-permissions \
    The orchestrator runs it and commits the result with explicit paths. That is
    measurement, not implementation, and the PR says who ran what.
 
+## Running `codex` beside `agy`
+
+Authorised by the operator on 2026-09-22: `codex` is a second implementer, not
+only the fallback for an exhausted Claude budget. Two briefs that do not depend
+on each other run at the same time, one on each tool.
+
+```bash
+codex exec --dangerously-bypass-approvals-and-sandbox \
+    -C "C:\Users\rudso\Projetos\<worktree>" \
+    -c model_reasoning_effort="medium" \
+    -o <last-message file> - < <brief path>
+```
+
+1. **Medium effort, set per call.** The operator's `config.toml` defaults to
+   `high`; the call overrides it with `-c model_reasoning_effort="medium"`. The
+   config file is the operator's and is not edited.
+2. **One agent, one working tree.** Two agents never share a checkout. The
+   second one gets a `git worktree` (`git worktree add ../<repo>-<topic> -b
+   <branch> <commit>`), and its brief names that directory, says not to switch
+   branches, and names the other agent's directory as off limits.
+3. **The sandbox has to be bypassed** for the same reason `agy` needs its flag:
+   a worktree's git data lives in the main checkout, outside the workspace the
+   sandbox allows, so commit and push fail inside it.
+4. A brief that depends on an unmerged PR branches from that PR's branch and
+   opens its PR against it (a stacked PR), never against `main`.
+
 ## Model policy
 
 **The medium tier is the default for all implementation.** Not the tier that
@@ -64,7 +90,7 @@ small enough that it is sufficient.
 |---|---|
 | all implementation: contracts, backends, checks, harness, tests, README | `gemini-3.8-flash-medium`, or `gpt-oss-120b-medium` |
 | architecture, licence calls, defect taxonomy, writing the briefs, reviewing PRs | Claude Opus 5, in Claude Code |
-| anything after the Claude budget is exhausted | `codex`, also at a medium model |
+| a second, parallel implementer; and everything after the Claude budget is exhausted | `codex` at medium reasoning effort |
 
 ### Scope carries what the model does not
 
