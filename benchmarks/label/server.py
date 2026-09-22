@@ -25,6 +25,7 @@ from .identity import (
 )
 from .schema import (
     DEFECTS,
+    DEFECT_DESCRIPTIONS_PT,
     LABEL_SCHEMA_VERSION,
     TAXONOMY_VERSION,
     LabelValidationError,
@@ -170,6 +171,7 @@ def make_handler(
                     {
                         "case": _public_case(case) if case else None,
                         "defects": DEFECTS,
+                        "descriptions": DEFECT_DESCRIPTIONS_PT,
                         "labeller": labeller,
                         "labelled": store.labelled_count,
                         "total": store.total_count,

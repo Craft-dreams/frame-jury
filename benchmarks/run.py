@@ -55,7 +55,10 @@ def load_labels(path: str | Path | None) -> dict[str, set[str]]:
             if not line:
                 continue
             data = json.loads(line)
-            labels[data["case_id"]] = set(data.get("defects", []))
+            defects = set(data.get("defects", []))
+            if data.get("taxonomy_version") == "2.0" and "broken_body" in defects:
+                defects.add("broken_body_v2_0")
+            labels[data["case_id"]] = defects
     return labels
 
 
