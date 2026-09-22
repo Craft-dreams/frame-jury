@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import threading
 import unittest
@@ -279,6 +280,10 @@ class IdentityServerTests(unittest.TestCase):
         with urlopen(self.base_url + path) as response:
             return json.load(response)
 
+    def get_text(self, path: str) -> str:
+        with urlopen(self.base_url + path) as response:
+            return response.read().decode("utf-8")
+
     def post_json(self, path: str, payload: dict[str, object]) -> tuple[int, dict[str, object]]:
         request = Request(
             self.base_url + path,
@@ -344,6 +349,35 @@ class IdentityServerTests(unittest.TestCase):
         self.assertIn("decision", response["error"])
         existing = self.get_json("/api/next")
         self.assertEqual(existing["case"]["case_id"], self.case["case_id"])
+
+    def test_identity_page_script_and_frame_page_link_are_served(self) -> None:
+        self.assertIn(
+            "Qual destes rostos é este personagem?",
+            self.get_text("/identity"),
+        )
+        self.assertIn("loadNext", self.get_text("/identity.js"))
+        self.assertIn('href="/identity"', self.get_text("/"))
+
+    def test_identity_face_markers_and_action_bar_styles_are_served(self) -> None:
+        css = self.get_text("/style.css")
+        face_marker = re.search(r"\.face-box\s*\{([^}]*)\}", css)
+        action_bar = re.search(r"\.identity-decision-panel\s*\{([^}]*)\}", css)
+        self.assertIsNotNone(face_marker)
+        self.assertIn("background: transparent", face_marker.group(1))
+        self.assertIsNotNone(action_bar)
+        self.assertIn("position: sticky", action_bar.group(1))
+
+    def test_frame_page_serves_open_positive_prompt_and_sticky_decision_bar(self) -> None:
+        html = self.get_text("/")
+        css = self.get_text("/style.css")
+
+        heading = "Prompt positivo (o que foi pedido)"
+        self.assertIn(heading, html)
+        positive_prompt = html.index('id="positive-prompt"')
+        self.assertNotIn("<details", html[:positive_prompt].rsplit("</details>", 1)[-1])
+        decision_bar = re.search(r"\.frame-page \.decision-panel\s*\{([^}]*)\}", css)
+        self.assertIsNotNone(decision_bar)
+        self.assertIn("position: sticky", decision_bar.group(1))
 
 
 if __name__ == "__main__":

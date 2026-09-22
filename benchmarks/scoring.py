@@ -12,6 +12,7 @@ def score(
     results: dict[str, CompetitorResult],
     labels: dict[str, set[str]],
     defect: str,
+    identity_truth: dict[str, bool] | None = None,
 ) -> dict[str, float | None]:
     """Score competitor results against ground-truth labels for a given defect.
 
@@ -23,6 +24,9 @@ def score(
         Mapping of case_id to set of ground-truth defect slugs/decisions.
     defect:
         The defect slug to score (e.g. 'duplicated_character').
+    identity_truth:
+        Case-level identity ground truth. For ``wrong_identity`` this replaces
+        frame labels entirely; missing cases are excluded.
 
     Returns
     -------
@@ -39,12 +43,15 @@ def score(
        'broken_face'. Both are reported in the excluded tally.
     3. An abstention is neither a positive nor a negative. Exclude the case from
        that defect's precision and recall, and report the abstention rate.
+    4. ``wrong_identity`` is scored only from the separate identity pass.
     """
     abstain_count = sum(1 for r in results.values() if defect in r.abstained)
     abstain_rate = (abstain_count / len(results)) if results else None
 
-    # When zero labels are available, we cannot compute precision/recall/F1.
-    if not labels:
+    truth_available = bool(identity_truth) if defect == "wrong_identity" else bool(labels)
+
+    # When zero applicable labels are available, we cannot compute precision/recall/F1.
+    if not truth_available:
         return {
             "precision": None,
             "recall": None,
@@ -63,6 +70,21 @@ def score(
     excluded_legacy = 0
 
     for case_id, res in results.items():
+        if defect == "wrong_identity":
+            if identity_truth is None or case_id not in identity_truth:
+                continue
+            if defect in res.abstained:
+                continue
+            is_gt_positive = identity_truth[case_id]
+            is_pred_positive = defect in res.defects
+            if is_pred_positive and is_gt_positive:
+                tp += 1
+            elif is_pred_positive and not is_gt_positive:
+                fp += 1
+            elif not is_pred_positive and is_gt_positive:
+                fn += 1
+            continue
+
         if case_id not in labels:
             continue
         gt_defects = labels[case_id]

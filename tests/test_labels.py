@@ -138,19 +138,20 @@ class LabelTests(unittest.TestCase):
             self.assertEqual(store.positive_counts["broken_hands"], 0)
             self.assertEqual(store.positive_counts["broken_body"], 0)
 
-    def test_page_leads_with_declaration_and_keeps_prompts_visible(self) -> None:
+    def test_page_keeps_prompts_with_frame_and_declaration_visible(self) -> None:
         static = Path(__file__).parents[1] / "benchmarks" / "label" / "static"
         html = (static / "index.html").read_text(encoding="utf-8")
         javascript = (static / "app.js").read_text(encoding="utf-8")
 
         ordered_markers = [
+            "Prompt positivo (o que foi pedido)",
+            'id="positive-prompt"',
+            "Prompt negativo",
             'id="framing"',
             "Must be visible",
             'id="entities"',
             "No character is declared in this shot — only the setting",
             "Staging",
-            "Positive prompt",
-            "Negative prompt",
         ]
         positions = [html.index(marker) for marker in ordered_markers]
         self.assertEqual(positions, sorted(positions))

@@ -160,8 +160,12 @@ def make_handler(
             parsed = urlparse(self.path)
             if parsed.path in {"/", "/index.html"}:
                 self._static("index.html")
+            elif parsed.path == "/identity":
+                self._static("identity.html")
             elif parsed.path == "/app.js":
                 self._static("app.js")
+            elif parsed.path == "/identity.js":
+                self._static("identity.js")
             elif parsed.path == "/style.css":
                 self._static("style.css")
             elif parsed.path == "/api/next":

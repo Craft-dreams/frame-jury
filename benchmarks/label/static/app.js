@@ -128,6 +128,7 @@ async function initialise() {
     button.dataset.defect = defect;
     button.dataset.shortcut = shortcuts[index];
     const desc = descriptions[defect] || "";
+    button.title = desc;
     const descHtml = desc ? `<span class="defect-desc">${desc}</span>` : "";
     button.innerHTML = `<span class="defect-name"><kbd>${shortcuts[index]}</kbd> ${defect.replaceAll("_", " ")}</span>${descHtml}`;
     button.addEventListener("click", () => toggleDefect(defect, button));
@@ -148,6 +149,7 @@ async function initialise() {
 document.addEventListener("keydown", (event) => {
   if (event.target.matches("textarea, input")) {
     if (event.key === "Escape") event.target.blur();
+    else if (event.target.id === "notes" && event.key === "Enter") submit([...selected]);
     return;
   }
   const key = event.key.toLowerCase();

@@ -6,11 +6,12 @@
     <title>frame-jury label</title>
     <link rel="stylesheet" href="/style.css">
   </head>
-  <body>
+  <body class="frame-page">
     <header>
       <div>
         <h1>frame-jury</h1>
         <p>Judge the frame against its declaration.</p>
+        <a href="/identity">Rotular identidade</a>
       </div>
       <div class="progress" aria-live="polite">
         <div id="progress-summary">Loading…</div>
@@ -19,8 +20,18 @@
     </header>
     <main id="workspace" hidden>
       <section class="frame-panel">
-        <img id="frame" alt="Frame to label">
+        <div class="frame-image-box">
+          <img id="frame" alt="Frame to label">
+        </div>
         <div id="case-id" class="case-id"></div>
+        <div class="positive-prompt-box">
+          <h2>Prompt positivo (o que foi pedido)</h2>
+          <p id="positive-prompt"></p>
+        </div>
+        <details class="negative-prompt-box">
+          <summary>Prompt negativo</summary>
+          <p id="negative-prompt"></p>
+        </details>
       </section>
       <section class="declaration-panel">
         <div class="framing"><span>Framing</span><strong id="framing"></strong></div>
@@ -33,28 +44,24 @@
           <div><span>Must render</span><strong id="must-render"></strong></div>
           <div><span>Composition</span><strong id="composition"></strong></div>
         </div>
-        <div class="prompts">
-          <details>
-            <summary>Positive prompt</summary>
-            <p id="positive-prompt"></p>
-          </details>
-          <details>
-            <summary>Negative prompt</summary>
-            <p id="negative-prompt"></p>
-          </details>
-        </div>
       </section>
       <section class="decision-panel">
-        <h2>Decision</h2>
-        <p class="hint">Toggle every visible defect, then press Enter. Clean and uncertain submit immediately.</p>
-        <div id="defect-buttons" class="buttons"></div>
-        <div class="buttons special">
-          <button type="button" data-exclusive="clean"><kbd>C</kbd> clean</button>
-          <button type="button" data-exclusive="uncertain"><kbd>U</kbd> uncertain</button>
+        <div class="decision-heading">
+          <h2>Decision</h2>
+          <p class="hint">Select defects, then Enter · C clean · U uncertain · N notes · Esc blur</p>
         </div>
-        <label for="notes">Notes <span>(N)</span></label>
-        <textarea id="notes" rows="3" placeholder="Optional context for review"></textarea>
-        <button id="save" class="save" type="button"><kbd>Enter</kbd> save selected defects</button>
+        <div class="decision-layout">
+          <div id="defect-buttons" class="buttons"></div>
+          <div class="decision-actions">
+            <div class="buttons special">
+              <button type="button" data-exclusive="clean"><kbd>C</kbd> clean</button>
+              <button type="button" data-exclusive="uncertain"><kbd>U</kbd> uncertain</button>
+            </div>
+            <label for="notes">Notes <span>(N)</span></label>
+            <input id="notes" type="text" placeholder="Optional context for review">
+            <button id="save" class="save" type="button"><kbd>Enter</kbd> save selected defects</button>
+          </div>
+        </div>
         <p id="message" role="alert"></p>
       </section>
     </main>

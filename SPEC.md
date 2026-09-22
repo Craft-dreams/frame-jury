@@ -376,6 +376,25 @@ their face is not in the frame; `unsure` otherwise. Picking **two** faces as the
 same character is how a duplicate is recorded — the ground truth identity-based
 `duplicated_character` will need.
 
+Two findings from the first look at this page and at duplicates the operator
+reported (2026-09-22), both open:
+
+- **Collective characters.** The corpus has characters that are a group —
+  "agentes", three men in suits on one reference sheet. For them several faces
+  are correct, not a duplicate, and the labeller picks all of them as `same`.
+  Nothing structured says an entity is a group: only its plural name, which is
+  prose. Until the declaration carries that fact (an entity-level field, set
+  upstream by the factory), duplicate scoring cannot tell a group from a clone
+  and must not score entities it cannot classify.
+- **Face similarity alone does not separate clones.** On six clone frames the
+  operator reported, the most similar pair of faces in the frame scored
+  0.28–0.72 (SFace); on 63 frames labelled without a duplicate it reached 0.66,
+  mostly stylised and anime faces the model sees as alike. No threshold on the
+  face separates them. Every one of the six clones also wears **identical
+  clothing**, which faces ignore — so identity-based `duplicated_character`
+  needs a whole-person appearance signal, measured on these labels before it is
+  built, not a face threshold.
+
 Scoring `wrong_identity` uses **only** identity records. A case is positive when
 any of its characters is `different`, negative when every character with a
 reference is `same`, and excluded otherwise — including every case with no
