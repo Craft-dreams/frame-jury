@@ -381,8 +381,7 @@ their face is not in the frame; `unsure` otherwise. Picking **two** faces as the
 same character is how a duplicate is recorded — the ground truth identity-based
 `duplicated_character` will need.
 
-Two findings from the first look at this page and at duplicates the operator
-reported (2026-09-22), both open:
+Findings from the identity labelling pass and duplicate investigation:
 
 - **Collective characters.** The corpus has characters that are a group —
   "agentes", three men in suits on one reference sheet. For them several faces
@@ -391,30 +390,53 @@ reported (2026-09-22), both open:
   prose. Until the declaration carries that fact (an entity-level field, set
   upstream by the generator pipeline), duplicate scoring cannot tell a group from a clone
   and must not score entities it cannot classify.
-- **Face similarity alone does not separate clones.** On six clone frames the
-  operator reported, the most similar pair of faces in the frame scored
-  0.28–0.72 (SFace); on 63 frames labelled without a duplicate it reached 0.66,
-  mostly stylised and anime faces the model sees as alike. No threshold on the
-  face separates them. Every one of the six clones also wears **identical
-  clothing**, which faces ignore — so identity-based `duplicated_character`
-  needs a whole-person appearance signal, measured on these labels before it is
-  built, not a face threshold.
-
-  Where the six came from matters for how they can be used. Two are corpus
-  frames and are now labelled `duplicated_character`. The other four are not
-  cases and must not be made into cases: three come from a run whose files no
-  longer exist, so no shot declaration survives for them, and inventing one
-  would be inventing the truth the judge compares against. The fourth is **not
-  a shot at all but a reference sheet** — the Production Bible's anchor image
-  for a character, generated with that character cloned. They stay as reported
-  examples for measuring the appearance signal, nothing more.
-
 - **A reference sheet can itself be defective.** Identity measures a frame's
   distance to the reference, so a cloned or deformed reference poisons every
   shot of that character, and no frame-level check can see it. Judging the
   reference sheets themselves — one declared character, exactly one person —
   is a natural use of the same presence and identity machinery, and belongs to
   the upstream reference generation stage as much as to this repository.
+
+### Measured signals: clones and anatomy
+
+All evaluations run on the same labelled set (172 frames judged: 22 broken-hands
+positives, 4 duplicate positives, ~150 negatives; plus 100 synthetic clones vs
+100 two-person frames), so numbers are directly comparable:
+
+1. **Overlapping box bug invalidated initial appearance results:** The person
+   detector returned overlapping boxes for a single person (17 of 70 multi-person
+   frames). Every clone signal now compares only distinct people (`box IoU < 0.2`).
+2. **Appearance signals for clones (most similar distinct pair per frame, post-fix):**
+   Colour histogram AUC 0.75, OSNet-AIN 0.72, OSNet 0.69, DINOv2 0.57. Face
+   similarity (SFace) does not separate (0.28–0.72 vs up to 0.66 on clean pairs).
+3. **"Two people look alike" is the wrong question:** Top-scoring clean pairs were
+   groups that look alike by design (agents in suits, hooded figures, generic
+   extras). A clone is one declared character appearing twice. Reframed per
+   character against its reference sheet (clone score = best character's
+   second-highest match): OSNet-AIN AUC 0.76, OSNet 0.63, DINOv2 0.59 (only 4
+   corpus positives).
+4. **Local VLM, verbalised JSON probability (8B instruct, 4-bit):** AUC 0.50 on every
+   defect — it answered "no defect" with confident wrong evidence even on all 22
+   broken hands. Verbalised probabilities carry no ranking signal.
+5. **Local VLM, yes/no first-token logit ratio (VQAScore, 3.9 s/frame):** Duplicated
+   character **AUC 0.94** (recall 3/4 at 10% FPR, 4/4 at 20%), `missing_entity` 0.78,
+   `fused_objects` 0.51, `broken_hands` 0.27 full frame / 0.42 on enlarged person crops.
+   On 100 synthetic clones vs 100 two-person frames: **AUC 1.00** — but those are easy
+   cases (posed, side by side), so treat it as an upper bound.
+6. **Contrastive in-context examples for hands (2 broken + 2 clean crops, leave-one-out):**
+   AUC 0.51. Three VLM attempts at chance: an 8B VLM does not perceive finger defects.
+7. **Hand-landmark instability (multi-transform landmarker):** Multi-transform (flip,
+   ±8°, 0.9/1.1 scale; features: presence, handedness, landmark variance, bone ratios,
+   joint angles, finger crossing): best single feature AUC 0.634; 5-fold out-of-fold
+   logistic fusion drops to **0.47**. Hand detected in only 70% of frames.
+8. **Finger counting by contour and convex hull:** AUC 0.645 but recall 0 at 5–10%
+   FPR, and segmentation fails on 30% of frames — not shippable as a standalone signal.
+9. **Line-art (Canny) crops vs colour crops (HOG + logistic, 5-fold, 22 positives):**
+   Colour **0.690** (95% CI 0.568–0.804), line art 0.527. Line art loses the shading
+   and continuity cues the defect lives in. The colour-crop classifier is the first
+   signal to pass the 0.66 reference of a rejected research-only detector, with 22
+   positives and no deep training — so the bottleneck for hands is labelled data, not
+   method.
 
 Scoring `wrong_identity` uses **only** identity records. A case is positive when
 any of its characters is `different`, negative when every character with a
