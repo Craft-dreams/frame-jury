@@ -13,6 +13,7 @@ from frame_jury.calibration.thresholds import CalibrationFile, load_defaults
 from frame_jury.checks.vlm_scene import (
     build_duplicated_character_question,
     build_missing_entity_question,
+    format_declared_entities,
     run_vlm_scene_check,
 )
 from frame_jury.contract import (
@@ -58,16 +59,20 @@ def _make_shot(
     *,
     shot_id: str = "shot-001",
     framing: str = "close-up",
-    characters: list[str | tuple[str, bool]] | None = None,
-    objects: list[str] | None = None,
+    characters: list[str | tuple[str, bool] | tuple[str, bool, str]] | None = None,
+    objects: list[str | tuple[str, str]] | None = None,
 ) -> Shot:
     entities: list[Entity] = []
     if characters:
         for idx, item in enumerate(characters):
             if isinstance(item, tuple):
-                name, is_collective = item
+                if len(item) == 3:
+                    name, is_collective, vis_id = item
+                else:
+                    name, is_collective = item
+                    vis_id = ""
             else:
-                name, is_collective = item, False
+                name, is_collective, vis_id = item, False, ""
             entities.append(
                 Entity(
                     entity_id=f"char-{idx}",
@@ -75,11 +80,16 @@ def _make_shot(
                     display_name=name,
                     aliases=(),
                     reference_images=(),
+                    visual_identity=vis_id,
                     is_collective=is_collective,
                 )
             )
     if objects:
-        for idx, name in enumerate(objects):
+        for idx, item in enumerate(objects):
+            if isinstance(item, tuple):
+                name, vis_id = item
+            else:
+                name, vis_id = item, ""
             entities.append(
                 Entity(
                     entity_id=f"obj-{idx}",
@@ -87,6 +97,7 @@ def _make_shot(
                     display_name=name,
                     aliases=(),
                     reference_images=(),
+                    visual_identity=vis_id,
                 )
             )
     return Shot(
@@ -153,7 +164,7 @@ class TestVlmSceneCheck(unittest.TestCase):
         )
         verdict = judge(request, vlm_scorer=scorer)
 
-        self.assertEqual(verdict.verdict, "reject")
+        self.assertEqual(verdict.verdict, "accept")
         self.assertEqual(len(verdict.findings), 2)
 
         defects = {f.defect: f for f in verdict.findings}
@@ -162,7 +173,7 @@ class TestVlmSceneCheck(unittest.TestCase):
 
         dup_finding = defects[DEFECT_DUPLICATED_CHARACTER]
         self.assertEqual(dup_finding.check, "vlm_scene")
-        self.assertEqual(dup_finding.severity, "blocking")
+        self.assertEqual(dup_finding.severity, "warning")
         self.assertAlmostEqual(dup_finding.confidence, 0.85)
         self.assertEqual(dup_finding.evidence["model"], "stub-qwen3-vl-8b")
         self.assertEqual(dup_finding.evidence["revision"], "stub-rev-42")
@@ -171,7 +182,7 @@ class TestVlmSceneCheck(unittest.TestCase):
 
         miss_finding = defects[DEFECT_MISSING_ENTITY]
         self.assertEqual(miss_finding.check, "vlm_scene")
-        self.assertEqual(miss_finding.severity, "blocking")
+        self.assertEqual(miss_finding.severity, "warning")
         self.assertAlmostEqual(miss_finding.confidence, 0.75)
         self.assertEqual(miss_finding.evidence["model"], "stub-qwen3-vl-8b")
         self.assertEqual(miss_finding.evidence["revision"], "stub-rev-42")
@@ -180,7 +191,7 @@ class TestVlmSceneCheck(unittest.TestCase):
     def test_findings_below_threshold_accepts(self) -> None:
         """Scores below or equal to threshold do not emit findings and result in accept."""
         shot = _make_shot(characters=["Hero"])
-        scorer = StubVlmScorer(scores=0.20)  # below default 0.50
+        scorer = StubVlmScorer(scores=0.05)  # below default thresholds (0.10, 0.50)
 
         request = JuryRequest(
             schema_version="2.0",
@@ -389,12 +400,143 @@ class TestVlmSceneCheck(unittest.TestCase):
         self.assertIn("Alice", clone_call_question)
         self.assertNotIn("grupo misterioso", clone_call_question)
 
-        # Score was 0.85 > 0.50 threshold -> blocking finding on Alice
-        self.assertEqual(verdict.verdict, "reject")
+        # Score was 0.85 > 0.10 threshold -> non-blocking warning finding on Alice
+        self.assertEqual(verdict.verdict, "accept")
         self.assertEqual(len(verdict.findings), 1)
         self.assertEqual(verdict.findings[0].defect, DEFECT_DUPLICATED_CHARACTER)
+        self.assertEqual(verdict.findings[0].severity, "warning")
         self.assertIn("Alice", verdict.findings[0].evidence["question"])
         self.assertNotIn("grupo misterioso", verdict.findings[0].evidence["question"])
+
+    def test_duplicate_question_matches_exact_measured_wording_for_mixed_shot(self) -> None:
+        """Duplicate question text matches the measured wording exactly for a mixed shot."""
+        shot = _make_shot(
+            characters=[
+                ("Alice", False, "tall detective in dark coat"),
+                ("grupo misterioso", True, "masked figures in shadows"),
+            ],
+            objects=[("Magic Key", "antique brass key")],
+        )
+        question = build_duplicated_character_question(shot)
+        expected = (
+            "This is a frame from an AI-generated film. The shot declared these entities:\n"
+            "- Alice (character): tall detective in dark coat\n"
+            "- Magic Key (object): antique brass key\n\n"
+            "Does any ONE of the declared characters appear more than once in the image, "
+            "as two copies of the same person? Background extras and different people who merely "
+            "dress alike do not count."
+        )
+        self.assertEqual(question, expected)
+        self.assertNotIn("grupo misterioso", question)
+
+    def test_declaration_formatting_matches(self) -> None:
+        """Declaration formatting matches format, truncation to 220 chars, order, and empty case."""
+        # Empty case
+        empty_shot = _make_shot()
+        self.assertEqual(format_declared_entities(empty_shot), "- (no entities declared)")
+
+        # Normal formatting and ordering
+        shot = _make_shot(
+            characters=[("Alice", False, "tall detective in dark coat")],
+            objects=[("Magic Key", "antique brass key")],
+        )
+        expected = (
+            "- Alice (character): tall detective in dark coat\n"
+            "- Magic Key (object): antique brass key"
+        )
+        self.assertEqual(format_declared_entities(shot), expected)
+
+        # The visual identity - not the whole line - is truncated to 220 characters,
+        # exactly as the measured lab prompt did; the name and kind always survive.
+        long_identity = "X" * 300
+        long_shot = _make_shot(characters=[("Alice", False, long_identity)])
+        formatted = format_declared_entities(long_shot)
+        expected_line = f"- Alice (character): {'X' * 220}"
+        self.assertEqual(formatted, expected_line)
+
+    def test_duplicate_threshold_behavior(self) -> None:
+        """A duplicate score of 0.15 produces a finding and does not reject; 0.05 produces none."""
+        shot = _make_shot(characters=[("Hero", False, "brave warrior")])
+
+        # 0.15 > threshold 0.10 -> produces finding and does NOT reject
+        scorer_high = StubVlmScorer(
+            scores={
+                "Does any ONE of": 0.15,
+                "missing from the image": 0.0,
+            }
+        )
+        request_high = JuryRequest(
+            schema_version="2.0",
+            image_path=str(self.image_path),
+            shot=shot,
+            checks=("vlm_scene",),
+            budget="full",
+        )
+        verdict_high = judge(request_high, vlm_scorer=scorer_high)
+        self.assertEqual(verdict_high.verdict, "accept")
+        self.assertEqual(len(verdict_high.findings), 1)
+        self.assertEqual(verdict_high.findings[0].defect, DEFECT_DUPLICATED_CHARACTER)
+        self.assertEqual(verdict_high.findings[0].severity, "warning")
+
+        # 0.05 <= threshold 0.10 -> produces none
+        scorer_low = StubVlmScorer(
+            scores={
+                "Does any ONE of": 0.05,
+                "missing from the image": 0.0,
+            }
+        )
+        request_low = JuryRequest(
+            schema_version="2.0",
+            image_path=str(self.image_path),
+            shot=shot,
+            checks=("vlm_scene",),
+            budget="full",
+        )
+        verdict_low = judge(request_low, vlm_scorer=scorer_low)
+        self.assertEqual(verdict_low.verdict, "accept")
+        self.assertEqual(len(verdict_low.findings), 0)
+
+    def test_missing_entity_threshold_behavior(self) -> None:
+        """A missing_entity score of 0.6 produces a finding and does not reject; 0.4 produces none."""
+        shot = _make_shot(characters=[("Hero", False, "brave warrior")])
+
+        # 0.6 > threshold 0.50 -> produces finding and does NOT reject (non-blocking warning)
+        scorer_high = StubVlmScorer(
+            scores={
+                "Does any ONE of": 0.0,
+                "missing from the image": 0.60,
+            }
+        )
+        request_high = JuryRequest(
+            schema_version="2.0",
+            image_path=str(self.image_path),
+            shot=shot,
+            checks=("vlm_scene",),
+            budget="full",
+        )
+        verdict_high = judge(request_high, vlm_scorer=scorer_high)
+        self.assertEqual(verdict_high.verdict, "accept")
+        self.assertEqual(len(verdict_high.findings), 1)
+        self.assertEqual(verdict_high.findings[0].defect, DEFECT_MISSING_ENTITY)
+        self.assertEqual(verdict_high.findings[0].severity, "warning")
+
+        # 0.4 <= threshold 0.50 -> produces none
+        scorer_low = StubVlmScorer(
+            scores={
+                "Does any ONE of": 0.0,
+                "missing from the image": 0.40,
+            }
+        )
+        request_low = JuryRequest(
+            schema_version="2.0",
+            image_path=str(self.image_path),
+            shot=shot,
+            checks=("vlm_scene",),
+            budget="full",
+        )
+        verdict_low = judge(request_low, vlm_scorer=scorer_low)
+        self.assertEqual(verdict_low.verdict, "accept")
+        self.assertEqual(len(verdict_low.findings), 0)
 
     def test_unchanged_shot_behaves_as_before(self) -> None:
         """A shot without collective flags behaves identically to before."""

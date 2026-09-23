@@ -37,8 +37,8 @@
     "  identity_confidence: confidence assigned to a wrong_identity finding.",
     "",
     "Fields per framing (vlm_scene, I1):",
-    "  vlm_duplicated_character_threshold: score threshold for VLM duplicated_character (to be calibrated).",
-    "  vlm_missing_entity_threshold: score threshold for VLM missing_entity (to be calibrated).",
+    "  vlm_duplicated_character_threshold: score threshold for VLM duplicated_character. Calibrated at 0.10 across all framings (AUC 0.940, 4 positive clones: 0.0015, 0.148, 0.182, 0.321; threshold 0.10 catches 3 of 4 clones, precision 0.27, 5/132 clean frames flagged / 3.8% FPR; not enough labels to calibrate a blocking gate, non-blocking warning).",
+    "  vlm_missing_entity_threshold: score threshold for VLM missing_entity. Calibrated at 0.50 across all framings (AUC 0.779, 3 positive cases: 0.011, 0.269, 0.679; with 3 positives a single case moves AUC by 0.15; not enough labels to calibrate a blocking gate, non-blocking warning).",
     "",
     "Why wide-shot thresholds are more permissive than close-up:",
     "  A close-up and a wide shot must not share a threshold. In a close-up, the face",
@@ -63,7 +63,7 @@
       "identity_similarity_threshold": 0.55,
       "identity_ambiguous_band": 0.05,
       "identity_confidence": 0.85,
-      "vlm_duplicated_character_threshold": 0.50,
+      "vlm_duplicated_character_threshold": 0.10,
       "vlm_missing_entity_threshold": 0.50
     },
     "close-up": {
@@ -75,7 +75,7 @@
       "identity_similarity_threshold": 0.60,
       "identity_ambiguous_band": 0.05,
       "identity_confidence": 0.85,
-      "vlm_duplicated_character_threshold": 0.50,
+      "vlm_duplicated_character_threshold": 0.10,
       "vlm_missing_entity_threshold": 0.50
     },
     "medium shot": {
@@ -87,7 +87,7 @@
       "identity_similarity_threshold": 0.55,
       "identity_ambiguous_band": 0.05,
       "identity_confidence": 0.85,
-      "vlm_duplicated_character_threshold": 0.50,
+      "vlm_duplicated_character_threshold": 0.10,
       "vlm_missing_entity_threshold": 0.50
     },
     "wide shot": {
@@ -99,7 +99,7 @@
       "identity_similarity_threshold": 0.45,
       "identity_ambiguous_band": 0.05,
       "identity_confidence": 0.80,
-      "vlm_duplicated_character_threshold": 0.50,
+      "vlm_duplicated_character_threshold": 0.10,
       "vlm_missing_entity_threshold": 0.50
     },
     "extreme wide shot": {
@@ -111,7 +111,7 @@
       "identity_similarity_threshold": 0.40,
       "identity_ambiguous_band": 0.05,
       "identity_confidence": 0.75,
-      "vlm_duplicated_character_threshold": 0.50,
+      "vlm_duplicated_character_threshold": 0.10,
       "vlm_missing_entity_threshold": 0.50
     },
     "aerial": {
@@ -123,7 +123,7 @@
       "identity_similarity_threshold": 0.35,
       "identity_ambiguous_band": 0.05,
       "identity_confidence": 0.70,
-      "vlm_duplicated_character_threshold": 0.50,
+      "vlm_duplicated_character_threshold": 0.10,
       "vlm_missing_entity_threshold": 0.50
     }
   }
