@@ -164,7 +164,7 @@ class TestVlmSceneCheck(unittest.TestCase):
         )
         verdict = judge(request, vlm_scorer=scorer)
 
-        self.assertEqual(verdict.verdict, "reject")
+        self.assertEqual(verdict.verdict, "accept")
         self.assertEqual(len(verdict.findings), 2)
 
         defects = {f.defect: f for f in verdict.findings}
@@ -182,7 +182,7 @@ class TestVlmSceneCheck(unittest.TestCase):
 
         miss_finding = defects[DEFECT_MISSING_ENTITY]
         self.assertEqual(miss_finding.check, "vlm_scene")
-        self.assertEqual(miss_finding.severity, "blocking")
+        self.assertEqual(miss_finding.severity, "warning")
         self.assertAlmostEqual(miss_finding.confidence, 0.75)
         self.assertEqual(miss_finding.evidence["model"], "stub-qwen3-vl-8b")
         self.assertEqual(miss_finding.evidence["revision"], "stub-rev-42")
@@ -191,7 +191,7 @@ class TestVlmSceneCheck(unittest.TestCase):
     def test_findings_below_threshold_accepts(self) -> None:
         """Scores below or equal to threshold do not emit findings and result in accept."""
         shot = _make_shot(characters=["Hero"])
-        scorer = StubVlmScorer(scores=0.20)  # below default 0.50
+        scorer = StubVlmScorer(scores=0.05)  # below default thresholds (0.10, 0.50)
 
         request = JuryRequest(
             schema_version="2.0",
@@ -400,7 +400,7 @@ class TestVlmSceneCheck(unittest.TestCase):
         self.assertIn("Alice", clone_call_question)
         self.assertNotIn("grupo misterioso", clone_call_question)
 
-        # Score was 0.85 > 0.50 threshold -> non-blocking warning finding on Alice
+        # Score was 0.85 > 0.10 threshold -> non-blocking warning finding on Alice
         self.assertEqual(verdict.verdict, "accept")
         self.assertEqual(len(verdict.findings), 1)
         self.assertEqual(verdict.findings[0].defect, DEFECT_DUPLICATED_CHARACTER)
@@ -454,51 +454,89 @@ class TestVlmSceneCheck(unittest.TestCase):
         expected_line = f"- Alice (character): {'X' * 220}"
         self.assertEqual(formatted, expected_line)
 
-    def test_duplicate_finding_does_not_make_verdict_reject(self) -> None:
-        """A duplicate finding is non-blocking (warning severity) and does not reject by itself."""
+    def test_duplicate_threshold_behavior(self) -> None:
+        """A duplicate score of 0.15 produces a finding and does not reject; 0.05 produces none."""
         shot = _make_shot(characters=[("Hero", False, "brave warrior")])
-        scorer = StubVlmScorer(
+
+        # 0.15 > threshold 0.10 -> produces finding and does NOT reject
+        scorer_high = StubVlmScorer(
             scores={
-                "Does any ONE of": 0.85,
-                "missing from the image": 0.10,
+                "Does any ONE of": 0.15,
+                "missing from the image": 0.0,
             }
         )
-        request = JuryRequest(
+        request_high = JuryRequest(
             schema_version="2.0",
             image_path=str(self.image_path),
             shot=shot,
             checks=("vlm_scene",),
             budget="full",
         )
-        verdict = judge(request, vlm_scorer=scorer)
+        verdict_high = judge(request_high, vlm_scorer=scorer_high)
+        self.assertEqual(verdict_high.verdict, "accept")
+        self.assertEqual(len(verdict_high.findings), 1)
+        self.assertEqual(verdict_high.findings[0].defect, DEFECT_DUPLICATED_CHARACTER)
+        self.assertEqual(verdict_high.findings[0].severity, "warning")
 
-        self.assertEqual(verdict.verdict, "accept")
-        self.assertEqual(len(verdict.findings), 1)
-        self.assertEqual(verdict.findings[0].defect, DEFECT_DUPLICATED_CHARACTER)
-        self.assertEqual(verdict.findings[0].severity, "warning")
-
-    def test_missing_entity_at_threshold_makes_verdict_reject(self) -> None:
-        """A missing_entity finding at threshold 0.50 has blocking severity and rejects."""
-        shot = _make_shot(characters=[("Hero", False, "brave warrior")])
-        scorer = StubVlmScorer(
+        # 0.05 <= threshold 0.10 -> produces none
+        scorer_low = StubVlmScorer(
             scores={
-                "Does any ONE of": 0.10,
-                "missing from the image": 0.51,
+                "Does any ONE of": 0.05,
+                "missing from the image": 0.0,
             }
         )
-        request = JuryRequest(
+        request_low = JuryRequest(
             schema_version="2.0",
             image_path=str(self.image_path),
             shot=shot,
             checks=("vlm_scene",),
             budget="full",
         )
-        verdict = judge(request, vlm_scorer=scorer)
+        verdict_low = judge(request_low, vlm_scorer=scorer_low)
+        self.assertEqual(verdict_low.verdict, "accept")
+        self.assertEqual(len(verdict_low.findings), 0)
 
-        self.assertEqual(verdict.verdict, "reject")
-        self.assertEqual(len(verdict.findings), 1)
-        self.assertEqual(verdict.findings[0].defect, DEFECT_MISSING_ENTITY)
-        self.assertEqual(verdict.findings[0].severity, "blocking")
+    def test_missing_entity_threshold_behavior(self) -> None:
+        """A missing_entity score of 0.6 produces a finding and does not reject; 0.4 produces none."""
+        shot = _make_shot(characters=[("Hero", False, "brave warrior")])
+
+        # 0.6 > threshold 0.50 -> produces finding and does NOT reject (non-blocking warning)
+        scorer_high = StubVlmScorer(
+            scores={
+                "Does any ONE of": 0.0,
+                "missing from the image": 0.60,
+            }
+        )
+        request_high = JuryRequest(
+            schema_version="2.0",
+            image_path=str(self.image_path),
+            shot=shot,
+            checks=("vlm_scene",),
+            budget="full",
+        )
+        verdict_high = judge(request_high, vlm_scorer=scorer_high)
+        self.assertEqual(verdict_high.verdict, "accept")
+        self.assertEqual(len(verdict_high.findings), 1)
+        self.assertEqual(verdict_high.findings[0].defect, DEFECT_MISSING_ENTITY)
+        self.assertEqual(verdict_high.findings[0].severity, "warning")
+
+        # 0.4 <= threshold 0.50 -> produces none
+        scorer_low = StubVlmScorer(
+            scores={
+                "Does any ONE of": 0.0,
+                "missing from the image": 0.40,
+            }
+        )
+        request_low = JuryRequest(
+            schema_version="2.0",
+            image_path=str(self.image_path),
+            shot=shot,
+            checks=("vlm_scene",),
+            budget="full",
+        )
+        verdict_low = judge(request_low, vlm_scorer=scorer_low)
+        self.assertEqual(verdict_low.verdict, "accept")
+        self.assertEqual(len(verdict_low.findings), 0)
 
     def test_unchanged_shot_behaves_as_before(self) -> None:
         """A shot without collective flags behaves identically to before."""

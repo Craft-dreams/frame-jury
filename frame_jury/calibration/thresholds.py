@@ -44,8 +44,8 @@ class FramingThresholds:
     identity_confidence: float = 0.85
 
     # VLM scene thresholds (I1)
-    vlm_duplicated_character_threshold: float = 0.50  # non-blocking pending re-measurement
-    vlm_missing_entity_threshold: float = 0.50  # calibrated: AUC 0.933, recall 2/3, precision 0.50, 1.5% FPR
+    vlm_duplicated_character_threshold: float = 0.10  # calibrated: AUC 0.940, 4 positives (0.0015, 0.148, 0.182, 0.321), 3/4 recalled at 0.10 (precision 0.27, 3.8% FPR); not enough labels to calibrate a blocking gate
+    vlm_missing_entity_threshold: float = 0.50  # calibrated: AUC 0.779, 3 positives (0.011, 0.269, 0.679); not enough labels to calibrate a blocking gate
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "FramingThresholds":
@@ -59,7 +59,7 @@ class FramingThresholds:
             identity_ambiguous_band=float(d.get("identity_ambiguous_band", 0.05)),
             identity_confidence=float(d.get("identity_confidence", 0.85)),
             vlm_duplicated_character_threshold=float(
-                d.get("vlm_duplicated_character_threshold", 0.50)
+                d.get("vlm_duplicated_character_threshold", 0.10)
             ),
             vlm_missing_entity_threshold=float(
                 d.get("vlm_missing_entity_threshold", 0.50)

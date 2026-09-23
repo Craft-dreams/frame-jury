@@ -190,7 +190,7 @@ def run_vlm_scene_check(
             Finding(
                 check=_CHECK_NAME,
                 defect=DEFECT_MISSING_ENTITY,
-                severity="blocking",
+                severity="warning",
                 confidence=p_miss,
                 evidence={
                     "question": q_miss,
