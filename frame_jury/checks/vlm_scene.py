@@ -33,35 +33,38 @@ _CHECK_NAME = "vlm_scene"
 def format_declared_entities(
     shot: Shot, entities: tuple[Entity, ...] | list[Entity] | None = None
 ) -> str:
-    """Format declared entities from the shot declaration."""
-    lines = []
+    """Format declared entities from the shot declaration.
+
+    Each entity is formatted as:
+        - <display_name> (<kind>): <visual_identity>
+    truncated to 220 characters per entity line.
+    Returns '- (no entities declared)' when empty.
+    """
     entity_list = entities if entities is not None else shot.declared_entities
+    if not entity_list:
+        return "- (no entities declared)"
+    lines = []
     for entity in entity_list:
-        lines.append(f"- {entity.display_name} ({entity.kind})")
-    return "\n".join(lines) if lines else "None"
+        vis = entity.visual_identity.replace("\r\n", " ").replace("\n", " ")
+        line = f"- {entity.display_name} ({entity.kind}): {vis}"
+        lines.append(line[:220])
+    return "\n".join(lines)
 
 
 def build_duplicated_character_question(shot: Shot) -> str:
     """Build the yes/no question for duplicated_character.
 
-    Lists non-collective declared character names explicitly so the VLM knows which
-    identities must not appear duplicated. Collective characters are excluded.
+    Uses the exact generic wording measured in the lab (AUC 0.94).
+    Collective characters are excluded from the declaration block.
     """
-    non_collective_chars = shot.non_collective_characters()
     entities_to_show = [
         e for e in shot.declared_entities
         if not (e.kind == "character" and e.is_collective)
     ]
     decl = format_declared_entities(shot, entities=entities_to_show)
-    if non_collective_chars:
-        names_str = ", ".join(f"'{c.display_name}'" for c in non_collective_chars)
-        char_clause = f"the declared character(s) ({names_str})"
-    else:
-        char_clause = "any declared character"
-
     return (
         f"This is a frame from an AI-generated film. The shot declared these entities:\n{decl}\n\n"
-        f"Does any ONE of {char_clause} appear more than once in the image, "
+        "Does any ONE of the declared characters appear more than once in the image, "
         "as two copies of the same person? Background extras and different people who merely "
         "dress alike do not count."
     )
@@ -160,7 +163,7 @@ def run_vlm_scene_check(
                 Finding(
                     check=_CHECK_NAME,
                     defect=DEFECT_DUPLICATED_CHARACTER,
-                    severity="blocking",
+                    severity="warning",
                     confidence=p_dup,
                     evidence={
                         "question": q_dup,

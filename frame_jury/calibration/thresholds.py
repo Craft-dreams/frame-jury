@@ -43,9 +43,9 @@ class FramingThresholds:
     identity_ambiguous_band: float = 0.05
     identity_confidence: float = 0.85
 
-    # VLM scene thresholds (I1) — default 0.5 (to be calibrated)
-    vlm_duplicated_character_threshold: float = 0.50  # to be calibrated
-    vlm_missing_entity_threshold: float = 0.50  # to be calibrated
+    # VLM scene thresholds (I1)
+    vlm_duplicated_character_threshold: float = 0.50  # non-blocking pending re-measurement
+    vlm_missing_entity_threshold: float = 0.50  # calibrated: AUC 0.933, recall 2/3, precision 0.50, 1.5% FPR
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "FramingThresholds":

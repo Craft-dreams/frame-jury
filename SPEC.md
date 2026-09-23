@@ -322,10 +322,12 @@ false `duplicated_character` findings at $P(\text{Yes}) = 0.679$ and $0.731$ on 
 frames declaring "grupo misterioso", causing false rejects). A clone check must
 judge whether an individual was duplicated, never whether a group depicts several
 people. The entity contract allows character entities to declare `is_collective: true`.
-The VLM clone question is restricted to non-collective characters, naming them
-explicitly. If every declared character in the shot is collective, the check skips
+The VLM clone question excludes collective characters from the declaration block.
+If every declared character in the shot is collective, the check skips
 the clone question entirely and records an abstention (`all_characters_collective`)
 rather than a false reject or a silent pass.
+
+**Wording parity and calibration.** Naming declared character names inside the question sentence collapsed the clone signal (the 4 true clones scored 0.0002, 0.0015, 0.029, and 0.119, while 4 clean frames scored >0.50; precision never exceeded 0.17 at any threshold). The measured generic question wording is now restored; duplicate findings are emitted as non-blocking (`severity="warning"`) until re-measured on GPU before blocking verdicts again. `missing_entity` is calibrated at threshold 0.50 across all framings (AUC 0.933, recall 2/3, precision 0.50, 2/132 clean frames rejected = 1.5% FPR).
 
 
 ## 7. Corpus and ground truth
