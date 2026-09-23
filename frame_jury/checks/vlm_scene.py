@@ -46,8 +46,7 @@ def format_declared_entities(
     lines = []
     for entity in entity_list:
         vis = entity.visual_identity.replace("\r\n", " ").replace("\n", " ")
-        line = f"- {entity.display_name} ({entity.kind}): {vis}"
-        lines.append(line[:220])
+        lines.append(f"- {entity.display_name} ({entity.kind}): {vis[:220]}")
     return "\n".join(lines)
 
 

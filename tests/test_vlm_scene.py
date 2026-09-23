@@ -446,12 +446,12 @@ class TestVlmSceneCheck(unittest.TestCase):
         )
         self.assertEqual(format_declared_entities(shot), expected)
 
-        # Line truncated to 220 characters
+        # The visual identity - not the whole line - is truncated to 220 characters,
+        # exactly as the measured lab prompt did; the name and kind always survive.
         long_identity = "X" * 300
         long_shot = _make_shot(characters=[("Alice", False, long_identity)])
         formatted = format_declared_entities(long_shot)
-        expected_line = f"- Alice (character): {long_identity}"[:220]
-        self.assertEqual(len(formatted), 220)
+        expected_line = f"- Alice (character): {'X' * 220}"
         self.assertEqual(formatted, expected_line)
 
     def test_duplicate_finding_does_not_make_verdict_reject(self) -> None:
