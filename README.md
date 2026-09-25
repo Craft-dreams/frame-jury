@@ -195,6 +195,53 @@ verdict = judge(request)
 
 The VLM backend (`Qwen3VlmScorer`, Qwen3-VL-8B-Instruct, Apache-2.0) uses 4-bit NF4 quantization and evaluates yes/no questions via VQAScore (one forward pass at the first answer token, no generation). When the backend is unavailable, it records a first-class `abstention` (`verdict="unsure"`) rather than silently passing.
 
+## Command line
+
+Judge a whole batch in one process, so the detector, face and VLM backends
+load once for the batch, not once per frame:
+
+```powershell
+python -m frame_jury judge --requests requests.json --out verdicts.json
+```
+
+`requests.json` is a JSON list of request objects. Each is exactly the §4
+request (see `SPEC.md`) plus one extra field, a caller-chosen string
+`"request_id"` — stripped before judging, because it is not part of the
+contract:
+
+```jsonc
+[
+  {
+    "request_id": "shot-scene-001-004",       // chosen by the caller
+    "schema_version": "2.0",
+    "image_path": "../your-project/frames/shot-scene-001-004.png",
+    "shot": { ... },
+    "checks": ["presence", "identity"],       // optional subset
+    "budget": "cheap"
+  }
+]
+```
+
+`verdicts.json` is a JSON list, in request order. Each entry is either
+`{"request_id": ..., "verdict": { ...the §4 verdict... }}` or, for a request
+that failed to parse or whose judgement raised,
+`{"request_id": ..., "error": "TypeName: message"}` — the batch continues
+past an error. The file is written to `<out>.tmp` and replaced after every
+request, so a crash keeps the frames already judged.
+
+Exit codes: `0` when every request produced a verdict, `2` when at least one
+errored, `1` on usage errors — unreadable input, invalid JSON, or a duplicate
+or missing `request_id`, in which case nothing is judged. stderr carries one
+progress line per frame:
+
+```text
+judged 1/3 shot-scene-001-004: accept (0 findings, 0 abstentions) in 0.2s
+```
+
+Backends load once per batch: the detector and face backend are built the
+first time a request needs them, and the VLM backend only when some request
+asks for `"budget": "full"`.
+
 ## Calibration
 
 Thresholds are stored in `frame_jury/calibration/defaults.json`, keyed by
